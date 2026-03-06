@@ -1,0 +1,10 @@
+## Interface: 120000, 120001
+## Title: |cff0cd29fEllesmereUI|r Page Switch
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Notes: Shift+MouseWheel page switching for MainBar (Bar1 ↔ Bar6 slots)
+## Author: Ayije
+## Version: 1.0
+## Dependencies: EllesmereUIActionBars
+
+EllesmereUI_PageSwitch.lua

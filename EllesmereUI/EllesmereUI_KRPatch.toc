@@ -1,0 +1,11 @@
+## Interface: 120000, 120001
+## Title: EllesmereUI KR Patch
+## Notes: Korean localization and 2002 font overlay for EllesmereUI
+## Author: Codex
+## Version: 1.0.0
+## Dependencies: EllesmereUI
+## OptionalDeps: EllesmereUIActionBars, EllesmereUIAuraBuffReminders, EllesmereUICooldownManager, EllesmereUICursor, EllesmereUINameplates, EllesmereUIRaidFrames, EllesmereUIResourceBars, EllesmereUIUnitFrames
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+Localization_koKR.lua
+Core.lua
