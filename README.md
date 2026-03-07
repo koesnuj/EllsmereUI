@@ -14,6 +14,7 @@ EllesmereUI 애드온 모음 (WoW Retail 12.0)
 | EllesmereUICursor | 커서 커스텀 |
 | EllesmereUINameplates | 네임플레이트 커스텀 |
 | EllesmereUIUnitFrames | 유닛프레임 커스텀 |
+| EllesmereUIUnlockExtras | Vehicle Leave, Queue Status, Loot Frame, Loot Roll 언락 모드 무버 |
 
 ## 수정 사항
 
@@ -40,3 +41,20 @@ EllesmereUIActionBars 업데이트 영향을 받지 않도록 독립 구성.
 - Shift+휠업: 페이지 2(Bar6) 전환, Shift+휠다운: 페이지 1(기본) 복귀
 - 토글 모드: 휠 업/다운 모두 전환↔복귀 동작
 - 변신/탈것 상태에서 자동 원복
+
+### EllesmereUIUnlockExtras — 신규 애드온
+
+EllesmereUI 언락 모드(Unlock Mode)에 블리자드 기본 UI 프레임 4종을 등록하여 자유롭게 위치를 조정할 수 있는 애드온.
+
+| 요소 | 블리자드 프레임 | 설명 |
+|------|----------------|------|
+| Vehicle Leave Button | `MainMenuBarVehicleLeaveButton` | 탈것 내리기 버튼 |
+| Queue Status | `QueueStatusButton` | LFG/PvP 대기열 눈 아이콘 |
+| Loot Frame | `LootFrame` | 전리품 획득 창 (`lootUnderMouse` CVar 활성 시 커서 위치 우선) |
+| Loot Roll (Need/Greed) | `GroupLootContainer` | 주사위 굴림(Need/Greed/Disenchant) 프레임 |
+
+**특징:**
+- EllesmereUI Lite 프로필 시스템 연동 — 프로필 전환 시 위치 자동 적용
+- Holder + Reparent + Hook 패턴으로 블리자드 UI 안정적 제어
+- 언락 모드에서 탈것 미탑승/대기열 미등록 상태에서도 무버 표시
+- SavedVariables: `EllesmereUIUnlockExtrasDB`
