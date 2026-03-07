@@ -3,7 +3,7 @@ if GetLocale() ~= "koKR" then return end
 
 local IS_KOREAN_LOCALE = true
 NS.FONT_NAME = "2002"
-NS.FONT_PATH = "Fonts\\2002.ttf"
+NS.FONT_PATH = "Interface\\AddOns\\EllesmereUI_KRPatch\\2002.ttf"
 
 local KO_EXACT = {
     ["General"] = "일반",
@@ -1703,19 +1703,26 @@ local function LocalizeTextObject(obj)
     if not IS_KOREAN_LOCALE or not obj or not obj.GetText or not obj.SetText then return end
     if obj._euiSkipLocalize then return end
     if obj.GetObjectType and obj:GetObjectType() == "EditBox" then return end
-    local currentText = obj:GetText()
-    if type(currentText) ~= "string" or currentText == "" then return end
-    local original = obj._euiOriginalText
-    if type(original) ~= "string" or original == "" then
-        original = currentText
-        obj._euiOriginalText = original
-    elseif currentText ~= original and currentText ~= NS.Translate(original) then
-        original = currentText
-        obj._euiOriginalText = original
-    end
-    local localized = NS.Translate(original)
-    if localized and localized ~= currentText then
-        obj:SetText(localized)
+
+    local ok = pcall(function()
+        local currentText = obj:GetText()
+        if type(currentText) ~= "string" or currentText == "" then return end
+        local original = obj._euiOriginalText
+        if type(original) ~= "string" or original == "" then
+            original = currentText
+            obj._euiOriginalText = original
+        elseif currentText ~= original and currentText ~= NS.Translate(original) then
+            original = currentText
+            obj._euiOriginalText = original
+        end
+        local localized = NS.Translate(original)
+        if localized and localized ~= currentText then
+            obj:SetText(localized)
+        end
+    end)
+
+    if not ok then
+        obj._euiSkipLocalize = true
     end
 end
 

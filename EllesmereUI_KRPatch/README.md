@@ -4,7 +4,7 @@ Standalone overlay addon for the EllesmereUI suite.
 
 ## Purpose
 - Keep Korean localization outside the upstream EllesmereUI addon folders.
-- Force the suite-wide UI/game font choice to `Fonts\\2002.ttf` for `koKR`.
+- Force the suite-wide UI/game font choice to `Interface\\AddOns\\EllesmereUI_KRPatch\\2002.ttf` for `koKR`.
 - Re-apply localization to the settings UI and `Unlock Mode` after pages are built.
 - Localize EUI chat messages, popup text, dropdown menus, and the EllesmereUI minimap tooltip from the overlay layer.
 

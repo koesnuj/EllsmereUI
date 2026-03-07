@@ -5,7 +5,7 @@ local E = _G.EllesmereUI
 if not E then return end
 
 local FONT_NAME = NS.FONT_NAME or "2002"
-local FONT_PATH = NS.FONT_PATH or "Fonts\\2002.ttf"
+local FONT_PATH = NS.FONT_PATH or "Interface\\AddOns\\EllesmereUI_KRPatch\\2002.ttf"
 local unpack = unpack or table.unpack
 
 local FONT_KEYS = {
@@ -902,6 +902,107 @@ local function HookUnlockFrame()
     NS.LocalizeFrameTexts(frame)
 end
 
+local InstallUnitFrameFontHooks
+do
+    local UNITFRAME_ROOT_NAMES = {
+        "EllesmereUIUnitFrames_Player",
+        "EllesmereUIUnitFrames_Target",
+        "EllesmereUIUnitFrames_Focus",
+        "EllesmereUIUnitFrames_Pet",
+        "EllesmereUIUnitFrames_TargetTarget",
+        "EllesmereUIUnitFrames_FocusTarget",
+        "EllesmereUIUnitFrames_Boss1",
+        "EllesmereUIUnitFrames_Boss2",
+        "EllesmereUIUnitFrames_Boss3",
+        "EllesmereUIUnitFrames_Boss4",
+        "EllesmereUIUnitFrames_Boss5",
+    }
+
+    local hookedUnitFrames = {}
+
+    local function ForceFontOnFontString(fs)
+        if not fs or type(fs.GetFont) ~= "function" or type(fs.SetFont) ~= "function" then
+            return
+        end
+
+        local currentPath, size, flags = fs:GetFont()
+        if currentPath == FONT_PATH then
+            return
+        end
+
+        fs:SetFont(FONT_PATH, size or 12, flags or "")
+    end
+
+    local function ApplyFontsToFrameTree(root)
+        if not root then return end
+
+        local queue = { root }
+        local seen = {}
+        local index = 1
+
+        while queue[index] do
+            local frame = queue[index]
+            index = index + 1
+
+            if frame and not seen[frame] then
+                seen[frame] = true
+
+                if type(frame.GetRegions) == "function" then
+                    local regions = { frame:GetRegions() }
+                    for i = 1, #regions do
+                        local region = regions[i]
+                        if region and type(region.IsObjectType) == "function" and region:IsObjectType("FontString") then
+                            ForceFontOnFontString(region)
+                        end
+                    end
+                end
+
+                if type(frame.GetChildren) == "function" then
+                    local children = { frame:GetChildren() }
+                    for i = 1, #children do
+                        queue[#queue + 1] = children[i]
+                    end
+                end
+            end
+        end
+    end
+
+    local function RefreshAllUnitFrameFonts()
+        for i = 1, #UNITFRAME_ROOT_NAMES do
+            ApplyFontsToFrameTree(_G[UNITFRAME_ROOT_NAMES[i]])
+        end
+    end
+
+    local function HookUnitFrame(root)
+        if not root or hookedUnitFrames[root] then return end
+
+        if root.HookScript then
+            root:HookScript("OnShow", function(self)
+                Delay(function()
+                    ApplyFontsToFrameTree(self)
+                end)
+            end)
+        end
+
+        if type(root.UpdateAllElements) == "function" then
+            hooksecurefunc(root, "UpdateAllElements", function(self)
+                Delay(function()
+                    ApplyFontsToFrameTree(self)
+                end)
+            end)
+        end
+
+        hookedUnitFrames[root] = true
+    end
+
+    InstallUnitFrameFontHooks = function()
+        for i = 1, #UNITFRAME_ROOT_NAMES do
+            HookUnitFrame(_G[UNITFRAME_ROOT_NAMES[i]])
+        end
+        RefreshAllUnitFrameFonts()
+    end
+end
+
 local InstallOverlayFeatureHooks
 do
     local CHARACTER_SLOT_NAMES = {
@@ -923,27 +1024,11 @@ do
         [17] = "CharacterSecondaryHandSlot",
     }
 
-    local CDM_BAR_KEYS = { "cooldowns", "utility" }
-    local ACTION_SLOT_BINDINGS = {
-        { first = 1, last = 12, prefix = "ACTIONBUTTON", offset = 0 },
-        { first = 25, last = 36, prefix = "MULTIACTIONBAR3BUTTON", offset = 24 },
-        { first = 37, last = 48, prefix = "MULTIACTIONBAR4BUTTON", offset = 36 },
-        { first = 49, last = 60, prefix = "MULTIACTIONBAR2BUTTON", offset = 48 },
-        { first = 61, last = 72, prefix = "MULTIACTIONBAR1BUTTON", offset = 60 },
-        { first = 145, last = 156, prefix = "MULTIACTIONBAR5BUTTON", offset = 144 },
-        { first = 157, last = 168, prefix = "MULTIACTIONBAR6BUTTON", offset = 156 },
-        { first = 169, last = 180, prefix = "MULTIACTIONBAR7BUTTON", offset = 168 },
-    }
-
     local overlayFrame
     local overlayHooksInstalled = false
-    local spellHotkeyLookup = {}
-    local textureHotkeyLookup = {}
-    local actionTextureBySpellID = {}
+    local playerCastbarHooksInstalled = false
     local pendingBagRefresh = false
     local pendingCharacterRefresh = false
-    local pendingHotkeyRefresh = false
-    local pendingHotkeyLookupRebuild = false
 
     local function EnsureOverlayText(owner, key, size, point, relativeTo, relativePoint, xOffset, yOffset)
         if not owner then return nil end
@@ -1163,206 +1248,99 @@ do
         end)
     end
 
-    local function NormalizeHotkeyText(text)
-        if type(text) ~= "string" then return nil end
-        text = text:gsub("%s+", "")
-        if text == "" then
-            return nil
-        end
-        text = text:gsub("SHIFT%-", "S-")
-        text = text:gsub("CTRL%-", "C-")
-        text = text:gsub("ALT%-", "A-")
-        text = text:gsub("BUTTON", "M")
-        text = text:gsub("MOUSEWHEELUP", "MWU")
-        text = text:gsub("MOUSEWHEELDOWN", "MWD")
-        text = text:gsub("NUMPADPLUS", "N+")
-        text = text:gsub("NUMPADMINUS", "N-")
-        text = text:gsub("NUMPADMULTIPLY", "N*")
-        text = text:gsub("NUMPADDIVIDE", "N/")
-        text = text:gsub("NUMPADDECIMAL", "N.")
-        text = text:gsub("NUMPAD", "N")
-        return text
-    end
-
-    local function GetBindingActionForSlot(slot)
-        if type(slot) ~= "number" then return nil end
-        for i = 1, #ACTION_SLOT_BINDINGS do
-            local range = ACTION_SLOT_BINDINGS[i]
-            if slot >= range.first and slot <= range.last then
-                return range.prefix .. (slot - range.offset)
-            end
-        end
-        return nil
-    end
-
-    local function RegisterSpellHotkey(lookup, spellID, hotkeyText)
-        local numericSpellID = tonumber(spellID)
-        if not lookup or not numericSpellID or numericSpellID <= 0 or not hotkeyText or hotkeyText == "" then
-            return
-        end
-        if not lookup[numericSpellID] then
-            lookup[numericSpellID] = hotkeyText
-        end
-        if type(GetOverrideSpell) == "function" then
-            local ok, overrideSpellID = pcall(GetOverrideSpell, numericSpellID)
-            if ok and type(overrideSpellID) == "number" and overrideSpellID > 0 and not lookup[overrideSpellID] then
-                lookup[overrideSpellID] = hotkeyText
-            end
-        end
-    end
-
-    local function RebuildSpellHotkeyLookup()
-        local lookup = {}
-        local textureLookup = {}
-        local spellTextures = {}
-        if type(GetActionInfo) ~= "function" or type(GetBindingKey) ~= "function" or type(GetBindingText) ~= "function" then
-            spellHotkeyLookup = lookup
-            textureHotkeyLookup = textureLookup
-            actionTextureBySpellID = spellTextures
-            return
-        end
-
-        for slot = 1, 180 do
-            local bindingAction = GetBindingActionForSlot(slot)
-            if bindingAction then
-                local key1, key2 = GetBindingKey(bindingAction)
-                local bindingKey = key1 or key2
-                local hotkeyText = bindingKey and NormalizeHotkeyText(GetBindingText(bindingKey, 1)) or nil
-                if hotkeyText then
-                    local actionType, actionID = GetActionInfo(slot)
-                    local actionTexture = type(GetActionTexture) == "function" and GetActionTexture(slot) or nil
-                    if actionType == "spell" and actionID then
-                        RegisterSpellHotkey(lookup, actionID, hotkeyText)
-                        if actionTexture and not textureLookup[actionTexture] then
-                            textureLookup[actionTexture] = hotkeyText
-                        end
-                        if actionTexture and not spellTextures[actionID] then
-                            spellTextures[actionID] = actionTexture
-                        end
-                    elseif actionType == "macro" and actionID and type(GetMacroSpell) == "function" then
-                        local macroSpellID = GetMacroSpell(actionID)
-                        RegisterSpellHotkey(lookup, macroSpellID, hotkeyText)
-                        if actionTexture and not textureLookup[actionTexture] then
-                            textureLookup[actionTexture] = hotkeyText
-                        end
-                        if actionTexture and macroSpellID and not spellTextures[macroSpellID] then
-                            spellTextures[macroSpellID] = actionTexture
-                        end
-                    elseif actionTexture and not textureLookup[actionTexture] then
-                        textureLookup[actionTexture] = hotkeyText
-                    end
-                end
-            end
-        end
-
-        spellHotkeyLookup = lookup
-        textureHotkeyLookup = textureLookup
-        actionTextureBySpellID = spellTextures
-    end
-
-    local function EnsureCDMHotkeyText(icon)
-        if not icon then return nil end
-        local fontSize = math.max(8, math.min(14, math.floor(((icon:GetWidth() or 36) * 0.28) + 0.5)))
-        return EnsureOverlayText(icon._textOverlay or icon, "_euiKRHotkeyText", fontSize, "TOPRIGHT", icon._textOverlay or icon, "TOPRIGHT", -1, -1)
-    end
-
-    local function RefreshCDMIconHotkey(icon)
-        if not icon then return end
-        local fs = EnsureCDMHotkeyText(icon)
-        if not fs then return end
-        fs:Hide()
-
-        local spellID = tonumber(icon._spellID)
-        local iconTexture = icon._tex and icon._tex.GetTexture and icon._tex:GetTexture() or nil
-        if not spellID or not icon:IsShown() then
-            icon._euiKRHotkeyCachedSpellID = nil
-            icon._euiKRHotkeyCachedText = nil
-            if icon:IsShown() and iconTexture then
-                local textureHotkeyText = textureHotkeyLookup[iconTexture]
-                if textureHotkeyText and textureHotkeyText ~= "" then
-                    if icon._euiKRHotkeyCachedText ~= textureHotkeyText then
-                        fs:SetText(textureHotkeyText)
-                        icon._euiKRHotkeyCachedText = textureHotkeyText
-                    end
-                    fs:Show()
-                end
-            end
-            return
-        end
-
-        local spellTexture = actionTextureBySpellID[spellID]
-        if (not spellTexture) and C_Spell and type(C_Spell.GetSpellTexture) == "function" then
-            spellTexture = C_Spell.GetSpellTexture(spellID)
-        end
-
-        local hotkeyText
-        if not spellTexture or spellTexture == iconTexture then
-            hotkeyText = spellHotkeyLookup[spellID]
-        end
-        if not hotkeyText and type(GetOverrideSpell) == "function" then
-            local ok, overrideSpellID = pcall(GetOverrideSpell, spellID)
-            if ok and type(overrideSpellID) == "number" and overrideSpellID > 0 then
-                local overrideTexture = actionTextureBySpellID[overrideSpellID]
-                if (not overrideTexture) and C_Spell and type(C_Spell.GetSpellTexture) == "function" then
-                    overrideTexture = C_Spell.GetSpellTexture(overrideSpellID)
-                end
-                if not overrideTexture or overrideTexture == iconTexture then
-                    hotkeyText = spellHotkeyLookup[overrideSpellID]
-                end
-            end
-        end
-        if not hotkeyText and iconTexture then
-            hotkeyText = textureHotkeyLookup[iconTexture]
-        end
-
-        if hotkeyText and hotkeyText ~= "" then
-            if icon._euiKRHotkeyCachedText ~= hotkeyText then
-                fs:SetText(hotkeyText)
-                icon._euiKRHotkeyCachedText = hotkeyText
-            end
-            icon._euiKRHotkeyCachedSpellID = spellID
-            fs:Show()
-            return
-        end
-
-        icon._euiKRHotkeyCachedSpellID = spellID
-        icon._euiKRHotkeyCachedText = nil
-    end
-
-    local function RefreshCDMHotkeys()
+    local function CleanupCDMHotkeyOverlays()
         if type(_G._ECME_GetBarFrame) ~= "function" then return end
 
-        for i = 1, #CDM_BAR_KEYS do
-            local frame = _G._ECME_GetBarFrame(CDM_BAR_KEYS[i])
-            if frame and frame:IsShown() and frame.GetChildren then
+        for _, barKey in ipairs({ "cooldowns", "utility" }) do
+            local frame = _G._ECME_GetBarFrame(barKey)
+            if frame and frame.GetChildren then
                 local children = { frame:GetChildren() }
-                for j = 1, #children do
-                    local child = children[j]
-                    if child and child._barKey == CDM_BAR_KEYS[i] then
-                        RefreshCDMIconHotkey(child)
+                for i = 1, #children do
+                    local child = children[i]
+                    local hotkeyText = child and child._euiKRHotkeyText
+                    if hotkeyText then
+                        hotkeyText:SetText("")
+                        hotkeyText:Hide()
                     end
                 end
             end
         end
     end
 
-    local function ScheduleCDMHotkeyRefresh()
-        if pendingHotkeyRefresh then return end
-        pendingHotkeyRefresh = true
-        Delay(function()
-            pendingHotkeyRefresh = false
-            RefreshCDMHotkeys()
-        end)
+    local function SuppressBlizzardPlayerCastbar()
+        local frame = _G.PlayerCastingBarFrame
+        if not frame then return end
+
+        if type(frame.UnregisterAllEvents) == "function" then
+            frame:UnregisterAllEvents()
+        end
+        frame:Hide()
+        if type(frame.SetScript) == "function" then
+            frame:SetScript("OnUpdate", nil)
+        end
+        if not frame._euiKRHideHooked then
+            hooksecurefunc(frame, "Show", function(self)
+                self:Hide()
+            end)
+            frame._euiKRHideHooked = true
+        end
     end
 
-    local function ScheduleHotkeyLookupRebuild()
-        if pendingHotkeyLookupRebuild then return end
-        pendingHotkeyLookupRebuild = true
-        Delay(function()
-            pendingHotkeyLookupRebuild = false
-            RebuildSpellHotkeyLookup()
-            ScheduleCDMHotkeyRefresh()
-        end)
+    local function SuppressEllesmerePlayerCastbar()
+        local db = _G.EllesmereUIUnitFramesDB
+        local settingsChanged = false
+        if db and db.profile and db.profile.player then
+            if db.profile.player.showPlayerCastbar ~= false then
+                db.profile.player.showPlayerCastbar = false
+                settingsChanged = true
+            end
+        end
+
+        local frame = _G.EllesmereUIUnitFrames_Player
+        if not frame then
+            SuppressBlizzardPlayerCastbar()
+            return
+        end
+
+        local castbar = frame.Castbar
+        local castbarBg = castbar and castbar.GetParent and castbar:GetParent() or nil
+
+        if castbar and type(frame.IsElementEnabled) == "function" and frame:IsElementEnabled("Castbar") and type(frame.DisableElement) == "function" then
+            pcall(frame.DisableElement, frame, "Castbar")
+        end
+
+        if castbar then
+            castbar:Hide()
+            if not castbar._euiKRHideHooked then
+                hooksecurefunc(castbar, "Show", function(self)
+                    self:Hide()
+                end)
+                castbar._euiKRHideHooked = true
+            end
+        end
+
+        if castbarBg then
+            castbarBg:Hide()
+            if not castbarBg._euiKRHideHooked then
+                hooksecurefunc(castbarBg, "Show", function(self)
+                    self:Hide()
+                end)
+                castbarBg._euiKRHideHooked = true
+            end
+        end
+
+        if settingsChanged and frame.UpdateAllElements then
+            pcall(frame.UpdateAllElements, frame, "EUIKRPatchHidePlayerCastbar")
+        end
+
+        if not playerCastbarHooksInstalled and frame.HookScript then
+            frame:HookScript("OnShow", function()
+                Delay(SuppressEllesmerePlayerCastbar)
+            end)
+            playerCastbarHooksInstalled = true
+        end
+
+        SuppressBlizzardPlayerCastbar()
     end
 
     local function HandleOverlayEvent(_, event, arg1)
@@ -1375,14 +1353,13 @@ do
             HookCharacterFrame()
             ScheduleBagItemLevelRefresh()
             ScheduleCharacterItemLevelRefresh()
-            ScheduleHotkeyLookupRebuild()
+            Delay(SuppressEllesmerePlayerCastbar)
             return
         end
 
         if event == "BAG_UPDATE_DELAYED" then
             ScheduleBagItemLevelRefresh()
             ScheduleCharacterItemLevelRefresh()
-            ScheduleHotkeyLookupRebuild()
             return
         end
 
@@ -1394,17 +1371,11 @@ do
 
         if event == "PLAYER_EQUIPMENT_CHANGED" or event == "UNIT_INVENTORY_CHANGED" then
             ScheduleCharacterItemLevelRefresh()
-            ScheduleHotkeyLookupRebuild()
             return
         end
 
-        if event == "UPDATE_BINDINGS"
-            or event == "ACTIONBAR_SLOT_CHANGED"
-            or event == "ACTIONBAR_PAGE_CHANGED"
-            or event == "SPELLS_CHANGED"
-            or event == "UPDATE_MACROS"
-            or event == "PLAYER_SPECIALIZATION_CHANGED" then
-            ScheduleHotkeyLookupRebuild()
+        if event == "PLAYER_SPECIALIZATION_CHANGED" then
+            Delay(SuppressEllesmerePlayerCastbar)
         end
     end
 
@@ -1414,7 +1385,7 @@ do
             HookCharacterFrame()
             ScheduleBagItemLevelRefresh()
             ScheduleCharacterItemLevelRefresh()
-            ScheduleCDMHotkeyRefresh()
+            CleanupCDMHotkeyOverlays()
             return
         end
 
@@ -1425,27 +1396,16 @@ do
         overlayFrame:RegisterEvent("GET_ITEM_INFO_RECEIVED")
         overlayFrame:RegisterEvent("PLAYER_EQUIPMENT_CHANGED")
         overlayFrame:RegisterEvent("UNIT_INVENTORY_CHANGED")
-        overlayFrame:RegisterEvent("UPDATE_BINDINGS")
-        overlayFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-        overlayFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-        overlayFrame:RegisterEvent("SPELLS_CHANGED")
-        overlayFrame:RegisterEvent("UPDATE_MACROS")
         overlayFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
         overlayFrame:SetScript("OnEvent", HandleOverlayEvent)
-        overlayFrame:SetScript("OnUpdate", function(self, elapsed)
-            self._cdmElapsed = (self._cdmElapsed or 0) + elapsed
-            if self._cdmElapsed < 0.2 then return end
-            self._cdmElapsed = 0
-            RefreshCDMHotkeys()
-        end)
 
         overlayHooksInstalled = true
         HookBagFrames()
         HookCharacterFrame()
-        RebuildSpellHotkeyLookup()
         ScheduleBagItemLevelRefresh()
         ScheduleCharacterItemLevelRefresh()
-        ScheduleCDMHotkeyRefresh()
+        CleanupCDMHotkeyOverlays()
+        Delay(SuppressEllesmerePlayerCastbar)
     end
 end
 
@@ -1512,6 +1472,7 @@ local function InstallRuntimeHooks()
     EnsureLocalizedAuraBuffReminderState()
     InstallCoreOverrides()
     InstallWidgetHooks()
+    InstallUnitFrameFontHooks()
     InstallOverlayFeatureHooks()
     InstallPrintHook()
     if E._deferredLoaded then
@@ -1523,6 +1484,7 @@ local function InstallRuntimeHooks()
         InstallCoreOverrides()
         InstallWidgetHooks()
         InstallDeferredWidgetHooks()
+        InstallUnitFrameFontHooks()
         InstallOverlayFeatureHooks()
         WrapUnlockOpen()
         Delay(LocalizeSettingsFrames)
@@ -1562,6 +1524,7 @@ loginFrame:SetScript("OnEvent", function(self)
     EnsureFontsDB()
     EnsureFontRegistry()
     ApplySharedUIFont(FONT_PATH)
+    InstallUnitFrameFontHooks()
     if _G.EllesmereUIDB then
         _G.EllesmereUIDB.fctFont = FONT_PATH
     end
@@ -1592,5 +1555,10 @@ itemInfoFrame:SetScript("OnEvent", function(_, event, arg1)
         end
         Delay(LocalizeSettingsFrames)
         StartLocalizationSweep()
+        return
+    end
+
+    if arg1 == "EllesmereUIUnitFrames" then
+        Delay(InstallUnitFrameFontHooks)
     end
 end)
