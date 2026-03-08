@@ -7,6 +7,8 @@
 -------------------------------------------------------------------------------
 local ADDON_NAME, ns = ...
 
+local function GetNPOptOutline() return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "" end
+
 -------------------------------------------------------------------------------
 --  Page / section names
 -------------------------------------------------------------------------------
@@ -41,9 +43,23 @@ initFrame:SetScript("OnEvent", function(self)
     local GetDebuffTextColor   = ns.GetDebuffTextColor
     local BAR_W                = ns.BAR_W
     local plates               = ns.plates
+    local GetNPOutline         = ns.GetNPOutline or function() return "OUTLINE" end
+    local GetNPUseShadow       = ns.GetNPUseShadow or function() return false end
 
     local pcall = pcall
     local pairs = pairs
+
+    -- Preview font setter: mirrors SetFSFont shadow logic for direct SetFont calls
+    local function SetPVFont(fs, fontPath, size, flags)
+        if not (fs and fs.SetFont) then return end
+        fs:SetFont(fontPath, size, flags)
+        if flags == "" then
+            fs:SetShadowOffset(1, -1)
+            fs:SetShadowColor(0, 0, 0, 1)
+        else
+            fs:SetShadowOffset(0, 0)
+        end
+    end
     local floor = math.floor
 
     ---------------------------------------------------------------------------
@@ -91,8 +107,8 @@ initFrame:SetScript("OnEvent", function(self)
                 cns = db.castNameSize or cns
                 cts = db.castTargetSize or cts
             end
-            if plate.castName then SetFSFont(plate.castName, cns, "OUTLINE") end
-            if plate.castTarget then SetFSFont(plate.castTarget, cts, "OUTLINE") end
+            if plate.castName then SetFSFont(plate.castName, cns, GetNPOutline()) end
+            if plate.castTarget then SetFSFont(plate.castTarget, cts, GetNPOutline()) end
             local auraStackSz = (db and db.auraStackTextSize) or ns.defaults.auraStackTextSize
             for i = 1, 4 do
                 if plate.debuffs[i] and plate.debuffs[i].count then SetFSFont(plate.debuffs[i].count, auraStackSz, "OUTLINE") end
@@ -237,7 +253,7 @@ initFrame:SetScript("OnEvent", function(self)
     --- @param parentW number  available width
     --- @return number height consumed
     local function BuildNameplatePreview(parent, parentW)
-        local FONT_PATH = DBVal("font")
+        local FONT_PATH = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
 
         -- Constants matching the real addon exactly
         local CAST_H = 17
@@ -451,7 +467,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Name text (anchored BOTTOM to health TOP, +4px gap, width 113)
         local nameFS = pf:CreateFontString(nil, "OVERLAY")
-        nameFS:SetFont(FONT_PATH, 11, "OUTLINE")
+        SetPVFont(nameFS, FONT_PATH, 11, GetNPOptOutline())
         nameFS:SetPoint("BOTTOM", health, "TOP", 0, 4)
         nameFS:SetWordWrap(false)
         nameFS:SetMaxLines(1)
@@ -460,13 +476,13 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Health percentage text (right-aligned inside health bar)
         local hpText = healthTextFrame:CreateFontString(nil, "OVERLAY")
-        hpText:SetFont(FONT_PATH, 10, "OUTLINE")
+        SetPVFont(hpText, FONT_PATH, 10, GetNPOptOutline())
         hpText:SetPoint("RIGHT", health, -2, 0)
         hpText:SetText(previewHpPct .. "%")
 
         -- Health number (centered, hidden by default)
         local hpNumber = healthTextFrame:CreateFontString(nil, "OVERLAY")
-        hpNumber:SetFont(FONT_PATH, 10, "OUTLINE")
+        SetPVFont(hpNumber, FONT_PATH, 10, GetNPOptOutline())
         hpNumber:SetPoint("CENTER", health, "CENTER", 0, 0)
         local hpNumStr = tostring(previewHpVal):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
         hpNumber:SetText(hpNumStr)
@@ -493,6 +509,7 @@ initFrame:SetScript("OnEvent", function(self)
         arrows.right:SetSize(11, 16)
         arrows.right:SetPoint("LEFT", health, "RIGHT", 8, 0)
         arrows.right:Hide()
+        pf._arrows = arrows  -- expose for Update resizing
 
         -- Classification icon (elite dragon) â€” shown when transient toggle is on
         local classIcon = pf:CreateTexture(nil, "OVERLAY")
@@ -537,7 +554,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Cast name (left, width 70)
         castParts.nameFS = cast:CreateFontString(nil, "OVERLAY")
-        castParts.nameFS:SetFont(FONT_PATH, 10, "OUTLINE")
+        SetPVFont(castParts.nameFS, FONT_PATH, 10, GetNPOptOutline())
         castParts.nameFS:SetPoint("LEFT", cast, 5, 0)
         castParts.nameFS:SetJustifyH("LEFT")
         castParts.nameFS:SetWordWrap(false)
@@ -546,7 +563,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Cast target (right, dynamic width)
         castParts.targetFS = cast:CreateFontString(nil, "OVERLAY")
-        castParts.targetFS:SetFont(FONT_PATH, 10, "OUTLINE")
+        SetPVFont(castParts.targetFS, FONT_PATH, 10, GetNPOptOutline())
         castParts.targetFS:SetPoint("RIGHT", cast, -3, 0)
         castParts.targetFS:SetJustifyH("RIGHT")
         castParts.targetFS:SetWordWrap(false)
@@ -720,12 +737,20 @@ initFrame:SetScript("OnEvent", function(self)
         --  Update â€” re-reads DB, applies to existing frames. No rebuilds.
         -------------------------------------------------------------------
         pf.Update = function(self)
-            local fontPath   = DBVal("font")
+            local fontPath   = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+            local npOutline  = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or "OUTLINE"
             local barH       = Snap(DBVal("healthBarHeight"))
             local rawBarW    = BAR_W + DBVal("healthBarWidth")
             local barW       = IsDragging() and rawBarW or Snap(rawBarW)
             local castH      = Snap(DBVal("castBarHeight") or defaults.castBarHeight)
             local showArrows = DBVal("showTargetArrows") == true
+            local arrowScale = DBVal("targetArrowScale") or defaults.targetArrowScale or 1.0
+            local arrowW = math.floor(11 * arrowScale + 0.5)
+            local arrowH = math.floor(16 * arrowScale + 0.5)
+            if pf._arrows then
+                pf._arrows.left:SetSize(arrowW, arrowH)
+                pf._arrows.right:SetSize(arrowW, arrowH)
+            end
             local cbColor    = (DB() and DB().castBar) or defaults.castBar
             local debuffY    = DBVal("debuffYOffset") or defaults.debuffYOffset
 
@@ -919,28 +944,28 @@ initFrame:SetScript("OnEvent", function(self)
             local function PlaceHealthInBar(element, anchor, point, xOff, yOff, fontSize, cr, cg, cb)
                 yOff = yOff or 0
                 if element == "healthPercent" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetParent(healthTextFrame)
                     hpText:SetText(pctStr)
                     hpText:SetPoint(point, health, anchor, xOff, yOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
                 elseif element == "healthNumber" then
-                    hpNumber:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpNumber, fontPath, fontSize, npOutline)
                     hpNumber:SetParent(healthTextFrame)
                     hpNumber:SetText(hpNumStr)
                     hpNumber:SetPoint(point, health, anchor, xOff, yOff)
                     hpNumber:SetTextColor(cr, cg, cb, 1)
                     hpNumber:Show()
                 elseif element == "healthPctNum" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetParent(healthTextFrame)
                     hpText:SetText(pctStr .. " | " .. hpNumStr)
                     hpText:SetPoint(point, health, anchor, xOff, yOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
                 elseif element == "healthNumPct" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetParent(healthTextFrame)
                     hpText:SetText(hpNumStr .. " | " .. pctStr)
                     hpText:SetPoint(point, health, anchor, xOff, yOff)
@@ -954,28 +979,28 @@ initFrame:SetScript("OnEvent", function(self)
                 txOff = txOff or 0
                 tyOff = tyOff or 0
                 if element == "healthPercent" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetText(pctStr)
                     hpText:SetParent(topTextFrame)
                     hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
                 elseif element == "healthNumber" then
-                    hpNumber:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpNumber, fontPath, fontSize, npOutline)
                     hpNumber:SetText(hpNumStr)
                     hpNumber:SetParent(topTextFrame)
                     hpNumber:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpNumber:SetTextColor(cr, cg, cb, 1)
                     hpNumber:Show()
                 elseif element == "healthPctNum" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetText(pctStr .. " | " .. hpNumStr)
                     hpText:SetParent(topTextFrame)
                     hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
                     hpText:SetTextColor(cr, cg, cb, 1)
                     hpText:Show()
                 elseif element == "healthNumPct" then
-                    hpText:SetFont(fontPath, fontSize, "OUTLINE")
+                    SetPVFont(hpText, fontPath, fontSize, npOutline)
                     hpText:SetText(hpNumStr .. " | " .. pctStr)
                     hpText:SetParent(topTextFrame)
                     hpText:SetPoint("BOTTOM", health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
@@ -988,7 +1013,7 @@ initFrame:SetScript("OnEvent", function(self)
             local function PlaceNameInBar(anchor, point, xOff, justify, txOff, tyOff, fontSize, cr, cg, cb, nameSlotKey)
                 txOff = txOff or 0
                 tyOff = tyOff or 0
-                nameFS:SetFont(fontPath, fontSize, "OUTLINE")
+                SetPVFont(nameFS, fontPath, fontSize, npOutline)
                 nameFS:SetParent(healthTextFrame)
                 nameFS:SetPoint(point, health, anchor, xOff + txOff, tyOff)
                 nameFS:SetJustifyH(justify)
@@ -1018,7 +1043,7 @@ initFrame:SetScript("OnEvent", function(self)
             local topFontSz = DBVal("textSlotTopSize") or defaults.textSlotTopSize
             local topC = (DB() and DB().textSlotTopColor) or defaults.textSlotTopColor
             if slotTop == "enemyName" then
-                nameFS:SetFont(fontPath, topFontSz, "OUTLINE")
+                SetPVFont(nameFS, fontPath, topFontSz, npOutline)
                 nameFS:SetParent(topTextFrame)
                 nameFS:SetPoint("BOTTOM", health, "TOP", topXOff, 4 + nameYOff + cpPush + topYOff)
                 nameFS:SetJustifyH("CENTER")
@@ -1077,8 +1102,8 @@ initFrame:SetScript("OnEvent", function(self)
             local cns = DBVal("castNameSize") or defaults.castNameSize
             local cts = DBVal("castTargetSize") or defaults.castTargetSize
             local cnc = (DB() and DB().castNameColor) or defaults.castNameColor
-            castParts.nameFS:SetFont(fontPath, cns, "OUTLINE")
-            castParts.targetFS:SetFont(fontPath, cts, "OUTLINE")
+            SetPVFont(castParts.nameFS, fontPath, cns, npOutline)
+            SetPVFont(castParts.targetFS, fontPath, cts, npOutline)
             castParts.nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
             local useClassColor = defaults.castTargetClassColor
             local dbRef = DB()
@@ -1130,11 +1155,29 @@ initFrame:SetScript("OnEvent", function(self)
                     local sideOff = DBVal("sideAuraXOffset") or defaults.sideAuraXOffset
                     frame:SetPoint("BOTTOMLEFT", health, "BOTTOMRIGHT", sideOff + (index - 1) * slotSpacing + sxOff, syOff)
                 elseif slotName == "topleft" then
-                    frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT",
-                        -2 - (index - 1) * slotSpacing + sxOff, debuffY + cpPush + syOff)
+                    local growth = DBVal("topleftSlotGrowth") or defaults.topleftSlotGrowth
+                    local idx = index - 1  -- 0 for icon 1, never moves
+                    local baseX = -2 + sxOff
+                    local baseY = debuffY + cpPush + syOff
+                    if growth == "up" then
+                        frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX, baseY + idx * slotSpacing)
+                    elseif growth == "right" then
+                        frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX + idx * slotSpacing, baseY)
+                    else
+                        frame:SetPoint("BOTTOMLEFT", health, "TOPLEFT", baseX - idx * slotSpacing, baseY)
+                    end
                 elseif slotName == "topright" then
-                    frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT",
-                        2 + (index - 1) * slotSpacing + sxOff, debuffY + cpPush + syOff)
+                    local growth = DBVal("toprightSlotGrowth") or defaults.toprightSlotGrowth
+                    local idx = index - 1  -- 0 for icon 1, never moves
+                    local baseX = 2 + sxOff
+                    local baseY = debuffY + cpPush + syOff
+                    if growth == "up" then
+                        frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX, baseY + idx * slotSpacing)
+                    elseif growth == "left" then
+                        frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX - idx * slotSpacing, baseY)
+                    else
+                        frame:SetPoint("BOTTOMRIGHT", health, "TOPRIGHT", baseX + idx * slotSpacing, baseY)
+                    end
                 elseif slotName == "bottom" then
                     frame:SetPoint("TOP", cast, "BOTTOM",
                         (index - (count + 1) / 2) * slotSpacing + sxOff, -2 + syOff)
@@ -1736,7 +1779,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         _, h = W:SectionHeader(parent, SECTION_FRIENDLY, y);  y = y - h
 
-        local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false end
+        local function friendlyPlayersOff() return DBVal("showFriendlyPlayers") == false and DBVal("friendlyShowDefaultNames") ~= true end
         local function friendlyPlateOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") ~= false end
         local function nameOnlyOff() return friendlyPlayersOff() or DBVal("friendlyNameOnly") == false end
 
@@ -1746,6 +1789,7 @@ initFrame:SetScript("OnEvent", function(self)
               getValue=function() return DBVal("showFriendlyPlayers") ~= false end,
               setValue=function(v)
                 DB().showFriendlyPlayers = v
+                if v then DB().friendlyShowDefaultNames = false end
                 if SetCVar then
                     pcall(SetCVar, "nameplateShowFriendlyPlayers", v and 1 or 0)
                     pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", v and 1 or 0)
@@ -1790,7 +1834,7 @@ initFrame:SetScript("OnEvent", function(self)
                     local MIN_POPUP_W = 180
 
                     local totalH = TOP_PAD + TITLE_H + TITLE_GAP + GAP
-                                 + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + TOGGLE_ROW_H
+                                 + ROW_H + GAP + ROW_H + GAP + ROW_H + GAP + TOGGLE_ROW_H + GAP + TOGGLE_ROW_H
                                  + TOP_PAD
 
                     local pf = CreateFrame("Frame", nil, UIParent)
@@ -1809,7 +1853,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Measure label widths to compute layout BEFORE creating sliders
                     local tmpFS = pf:CreateFontString(nil, "OVERLAY")
-                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, GetNPOptOutline())
                     local labelTexts = {"Distance", "Height", "Width"}
                     local maxLblW = 0
                     for _, txt in ipairs(labelTexts) do
@@ -1895,6 +1939,63 @@ initFrame:SetScript("OnEvent", function(self)
                         UpdateToggle4()
                     end)
                     pf._updateToggle = UpdateToggle4
+
+                    -- Row 5: Show Default Names
+                    local r5Y = r4Y - TOGGLE_ROW_H - GAP
+                    local lbl5 = MakeFont(pf, 11, nil, 1, 1, 1); lbl5:SetAlpha(0.6)
+                    lbl5:SetText("Show Default Names"); lbl5:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r5Y)
+
+                    local tgBtn5 = CreateFrame("Button", nil, pf)
+                    tgBtn5:SetSize(TG_W, TG_H)
+                    tgBtn5:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r5Y)
+
+                    local tgBg5 = SolidTex(tgBtn5, "BACKGROUND", 0.18, 0.18, 0.18, 0.85)
+                    tgBg5:SetAllPoints()
+                    local tgKnob5 = tgBtn5:CreateTexture(nil, "ARTWORK")
+                    tgKnob5:SetColorTexture(0.55, 0.55, 0.55, 1)
+                    tgKnob5:SetSize(KNOB_SZ, KNOB_SZ)
+
+                    local function UpdateToggle5()
+                        local on = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.friendlyShowDefaultNames == true)
+                        if on then
+                            local g = EllesmereUI.ELLESMERE_GREEN
+                            tgBg5:SetColorTexture(g.r, g.g, g.b, 0.45)
+                            tgKnob5:SetColorTexture(1, 1, 1, 0.95)
+                            tgKnob5:ClearAllPoints(); tgKnob5:SetPoint("RIGHT", tgBtn5, "RIGHT", -KNOB_PAD, 0)
+                        else
+                            tgBg5:SetColorTexture(0.18, 0.18, 0.18, 0.85)
+                            tgKnob5:SetColorTexture(0.55, 0.55, 0.55, 1)
+                            tgKnob5:ClearAllPoints(); tgKnob5:SetPoint("LEFT", tgBtn5, "LEFT", KNOB_PAD, 0)
+                        end
+                    end
+                    UpdateToggle5()
+                    tgBtn5:SetScript("OnClick", function()
+                        local cur = EllesmereUINameplatesDB and EllesmereUINameplatesDB.friendlyShowDefaultNames or false
+                        local newVal = not cur
+                        DB().friendlyShowDefaultNames = newVal
+                        if newVal then
+                            -- Turn off friendly nameplates, keep names on
+                            DB().showFriendlyPlayers = false
+                            if SetCVar then
+                                pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
+                                pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", 0)
+                                pcall(SetCVar, "nameplateShowFriends", 0)
+                                pcall(SetCVar, "UnitNameFriendlyPlayerName", 1)
+                            end
+                        else
+                            if SetCVar then
+                                pcall(SetCVar, "UnitNameFriendlyPlayerName", 0)
+                            end
+                        end
+                        if ns.UpdateFriendlyNameplateSystem then ns.UpdateFriendlyNameplateSystem() end
+                        if EllesmereUI and EllesmereUI.RefreshPage then EllesmereUI:RefreshPage() end
+                        UpdateToggle5()
+                    end)
+
+                    pf._updateToggle = function()
+                        UpdateToggle4()
+                        UpdateToggle5()
+                    end
 
                     -- Close on click outside
                     local wasDown = false
@@ -2056,7 +2157,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Measure label widths to compute layout BEFORE creating sliders
                     local tmpFS = pf:CreateFontString(nil, "OVERLAY")
-                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, GetNPOptOutline())
                     local labelTexts = {"Distance"}
                     local maxLblW = 0
                     for _, txt in ipairs(labelTexts) do
@@ -2397,7 +2498,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                     -- Measure label widths to compute layout BEFORE creating sliders
                     local tmpFS = pf:CreateFontString(nil, "OVERLAY")
-                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, "")
+                    tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, GetNPOptOutline())
                     local labelTexts = {"Lines", "Thickness", "Speed"}
                     local maxLblW = 0
                     for _, txt in ipairs(labelTexts) do
@@ -2547,7 +2648,7 @@ initFrame:SetScript("OnEvent", function(self)
             local rightFrame = row._rightRegion
             if rightFrame then
                 local suffixFS = rightFrame:CreateFontString(nil, "OVERLAY")
-                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, GetNPOptOutline())
                 suffixFS:SetTextColor(1, 1, 1, 0.35)
                 local sliderLabel
                 for i = 1, rightFrame:GetNumRegions() do
@@ -2615,7 +2716,7 @@ initFrame:SetScript("OnEvent", function(self)
             local leftFrame = focusCastRow._leftRegion
             if leftFrame then
                 local suffixFS = leftFrame:CreateFontString(nil, "OVERLAY")
-                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+                suffixFS:SetFont(EllesmereUI.EXPRESSWAY, 11, GetNPOptOutline())
                 suffixFS:SetTextColor(1, 1, 1, 0.35)
                 local sliderLabel
                 for i = 1, leftFrame:GetNumRegions() do
@@ -2691,8 +2792,8 @@ initFrame:SetScript("OnEvent", function(self)
             "topSlotSize", "topSlotXOffset", "topSlotYOffset",
             "rightSlotSize", "rightSlotXOffset", "rightSlotYOffset",
             "leftSlotSize", "leftSlotXOffset", "leftSlotYOffset",
-            "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset",
-            "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset",
+            "toprightSlotSize", "toprightSlotXOffset", "toprightSlotYOffset", "toprightSlotGrowth",
+            "topleftSlotSize", "topleftSlotXOffset", "topleftSlotYOffset", "topleftSlotGrowth",
             -- Text slot size + offset keys
             "textSlotTopSize", "textSlotTopXOffset", "textSlotTopYOffset",
             "textSlotRightSize", "textSlotRightXOffset", "textSlotRightYOffset",
@@ -3159,6 +3260,50 @@ initFrame:SetScript("OnEvent", function(self)
                 UpdatePreview()
               end });  y = y - h
 
+        -- Inline cog on Show Arrows (right region) for arrow scale
+        do
+            local rightRgn = targetGlowRow._rightRegion
+            local arrowOff = function() return DBVal("showTargetArrows") ~= true end
+            local _, arrowCogShow = EllesmereUI.BuildCogPopup({
+                title = "Arrow Scale",
+                rows = {
+                    { type="slider", label="Scale", min=0.5, max=3.0, step=0.1,
+                      get=function() return DBVal("targetArrowScale") or defaults.targetArrowScale or 1.0 end,
+                      set=function(v)
+                        DB().targetArrowScale = v
+                        for _, plate in pairs(plates) do
+                            local sc = v
+                            local aw = math.floor(11 * sc + 0.5)
+                            local ah = math.floor(16 * sc + 0.5)
+                            if plate.leftArrow then PP.Size(plate.leftArrow, aw, ah) end
+                            if plate.rightArrow then PP.Size(plate.rightArrow, aw, ah) end
+                        end
+                        UpdatePreview()
+                      end },
+                },
+            })
+            local arrowCogBtn = CreateFrame("Button", nil, rightRgn)
+            arrowCogBtn:SetSize(26, 26)
+            arrowCogBtn:SetPoint("RIGHT", rightRgn._control, "LEFT", -8, 0)
+            rightRgn._lastInline = arrowCogBtn
+            arrowCogBtn:SetFrameLevel(rightRgn:GetFrameLevel() + 5)
+            local arrowCogTex = arrowCogBtn:CreateTexture(nil, "OVERLAY")
+            arrowCogTex:SetAllPoints()
+            arrowCogTex:SetTexture(EllesmereUI.RESIZE_ICON)
+            local function UpdateArrowCogAlpha()
+                arrowCogBtn:SetAlpha(arrowOff() and 0.15 or 0.4)
+            end
+            EllesmereUI.RegisterWidgetRefresh(UpdateArrowCogAlpha)
+            UpdateArrowCogAlpha()
+            arrowCogBtn:SetScript("OnClick", function(self)
+                if not arrowOff() then arrowCogShow(self) end
+            end)
+            arrowCogBtn:SetScript("OnEnter", function(self)
+                if not arrowOff() then self:SetAlpha(0.75) end
+            end)
+            arrowCogBtn:SetScript("OnLeave", function(self) UpdateArrowCogAlpha() end)
+        end
+
         -- Eye icon to the left of the Target Glow Style dropdown to toggle glow on preview
         do
             local EYE_VISIBLE   = "Interface\\AddOns\\EllesmereUI\\media\\icons\\eui-visible.png"
@@ -3376,7 +3521,7 @@ initFrame:SetScript("OnEvent", function(self)
 
                 -- Measure label widths to compute layout BEFORE creating sliders
                 local tmpFS = pf:CreateFontString(nil, "OVERLAY")
-                tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 12, "")
+                tmpFS:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 12, GetNPOptOutline())
                 local labelTexts = {"X", "Y", "Size"}
                 local maxLblW = 0
                 for _, txt in ipairs(labelTexts) do
@@ -3433,6 +3578,57 @@ initFrame:SetScript("OnEvent", function(self)
                 pf._SLIDER_W = SLIDER_W
                 pf._S_ROW_Y = S_ROW_Y
 
+                -- Growth direction row (shown only for topleft/topright slots)
+                local GROWTH_ROW_H = 22
+                local G_ROW_Y = S_ROW_Y - SLIDER_H - GAP
+                pf._G_ROW_Y = G_ROW_Y
+                pf._GROWTH_ROW_H = GROWTH_ROW_H
+
+                local gLabel = MakeFont(pf, 12, nil, 1, 1, 1)
+                gLabel:SetAlpha(0.6); gLabel:SetText("Grow")
+                gLabel:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, G_ROW_Y)
+                pf._gLabel = gLabel
+
+                -- Three small radio buttons: values filled in at show time
+                local gBtns = {}
+                local BTN_W, BTN_H, BTN_GAP = 52, 20, 4
+                for bi = 1, 3 do
+                    local b = CreateFrame("Button", nil, pf)
+                    b:SetSize(BTN_W, BTN_H)
+                    b:SetPoint("TOPLEFT", pf, "TOPLEFT",
+                        SLIDER_LEFT + (bi - 1) * (BTN_W + BTN_GAP),
+                        G_ROW_Y - 1)
+                    local bg = b:CreateTexture(nil, "BACKGROUND")
+                    bg:SetAllPoints()
+                    bg:SetColorTexture(0.15, 0.15, 0.15, 0.8)
+                    b._bg = bg
+                    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+                    hl:SetAllPoints()
+                    hl:SetColorTexture(1, 1, 1, 0.06)
+                    local lbl = b:CreateFontString(nil, "OVERLAY")
+                    lbl:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 11, GetNPOptOutline())
+                    lbl:SetAllPoints()
+                    lbl:SetJustifyH("CENTER")
+                    lbl:SetJustifyV("MIDDLE")
+                    b._lbl = lbl
+                    b:SetScript("OnClick", function(self)
+                        if pf._growthSet then pf._growthSet(self._value) end
+                        -- Refresh button states
+                        local cur = pf._growthGet and pf._growthGet() or ""
+                        for _, gb in ipairs(gBtns) do
+                            local active = (gb._value == cur)
+                            gb._bg:SetColorTexture(
+                                active and 0.973 or 0.15,
+                                active and 0.839 or 0.15,
+                                active and 0.604 or 0.15,
+                                active and 0.25  or 0.8)
+                            gb._lbl:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7)
+                        end
+                    end)
+                    gBtns[bi] = b
+                end
+                pf._gBtns = gBtns
+
                 -- Layout constants stored for height calc
                 pf._TOP_PAD = TOP_PAD; pf._TITLE_H = TITLE_H; pf._TITLE_GAP = TITLE_GAP
                 pf._GAP = GAP; pf._SLIDER_H = SLIDER_H; pf._SIDE_PAD = SIDE_PAD
@@ -3479,6 +3675,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Show/hide size row and adjust height
             local hasSize = opts.sizeGet ~= nil
+            local hasGrowth = opts.growthGet ~= nil
             if hasSize then
                 -- Rebuild size slider if range changed
                 local sStep = opts.sizeStep or 1
@@ -3499,16 +3696,64 @@ initFrame:SetScript("OnEvent", function(self)
                 cogPopup._sLabel:Show()
                 if cogPopup._sTrack then cogPopup._sTrack:Show() end
                 if cogPopup._sValBox then cogPopup._sValBox:Show() end
-                -- 3-row height
-                local p = cogPopup
-                cogPopup:SetHeight(p._TOP_PAD + p._TITLE_H + p._TITLE_GAP + p._GAP + p._SLIDER_H + p._GAP + p._SLIDER_H + p._GAP + p._SLIDER_H + p._TOP_PAD)
             else
                 cogPopup._sLabel:Hide()
                 if cogPopup._sTrack then cogPopup._sTrack:Hide() end
                 if cogPopup._sValBox then cogPopup._sValBox:Hide() end
-                -- 2-row height (X + Y only)
+            end
+
+            -- Show/hide growth row
+            if hasGrowth then
+                cogPopup._growthGet = opts.growthGet
+                cogPopup._growthSet = opts.growthSet
+                local vals = opts.growthValues  -- { { value, label }, ... }
+                local cur = opts.growthGet()
+                for bi, btn in ipairs(cogPopup._gBtns) do
+                    local entry = vals and vals[bi]
+                    if entry then
+                        btn._value = entry.value
+                        btn._lbl:SetText(entry.label)
+                        local active = (entry.value == cur)
+                        btn._bg:SetColorTexture(
+                            active and 0.973 or 0.15,
+                            active and 0.839 or 0.15,
+                            active and 0.604 or 0.15,
+                            active and 0.25  or 0.8)
+                        btn._lbl:SetTextColor(active and 1 or 0.7, active and 1 or 0.7, active and 1 or 0.7)
+                        btn:Show()
+                    else
+                        btn:Hide()
+                    end
+                end
+                cogPopup._gLabel:Show()
+            else
+                cogPopup._growthGet = nil
+                cogPopup._growthSet = nil
+                cogPopup._gLabel:Hide()
+                for _, btn in ipairs(cogPopup._gBtns) do btn:Hide() end
+            end
+
+            -- Compute height based on visible rows
+            do
                 local p = cogPopup
-                cogPopup:SetHeight(p._TOP_PAD + p._TITLE_H + p._TITLE_GAP + p._GAP + p._SLIDER_H + p._GAP + p._SLIDER_H + p._TOP_PAD)
+                local rowH = p._SLIDER_H
+                local gap  = p._GAP
+                local rows = 2  -- X + Y always present
+                if hasSize   then rows = rows + 1 end
+                if hasGrowth then rows = rows + 1 end
+                local h = p._TOP_PAD + p._TITLE_H + p._TITLE_GAP
+                for r = 1, rows do
+                    h = h + gap + (r < rows and rowH or p._GROWTH_ROW_H)
+                end
+                -- last row uses GROWTH_ROW_H only if growth is the last row
+                -- recalculate cleanly
+                h = p._TOP_PAD + p._TITLE_H + p._TITLE_GAP
+                    + gap + rowH   -- X
+                    + gap + rowH   -- Y
+                if hasSize   then h = h + gap + rowH end
+                if hasGrowth then h = h + gap + p._GROWTH_ROW_H end
+                h = h + p._TOP_PAD
+                cogPopup:SetHeight(h)
             end
 
             -- Anchor above the icon
@@ -3561,7 +3806,22 @@ initFrame:SetScript("OnEvent", function(self)
             btn:SetScript("OnClick", function(self)
                 if CorePosOffDisabled(posKey) then return end
                 local sizeKey = posKey .. "SlotSize"
-                ShowCogPopup(self, {
+                local growthKey = posKey .. "SlotGrowth"
+                local growthValues
+                if posKey == "topleft" then
+                    growthValues = {
+                        { value = "left",  label = "Left"  },
+                        { value = "right", label = "Right" },
+                        { value = "up",    label = "Up"    },
+                    }
+                elseif posKey == "topright" then
+                    growthValues = {
+                        { value = "right", label = "Right" },
+                        { value = "left",  label = "Left"  },
+                        { value = "up",    label = "Up"    },
+                    }
+                end
+                local opts = {
                     title = slotLabel .. " Slot Settings",
                     xGet = function() return CorePosXGet(posKey) end,
                     xSet = function(v) CorePosXSet(posKey, v) end,
@@ -3570,7 +3830,13 @@ initFrame:SetScript("OnEvent", function(self)
                     sizeGet = function() return DBVal(sizeKey) or defaults[sizeKey] end,
                     sizeSet = function(v) DB()[sizeKey] = v; RefreshAllSlots(); UpdatePreview() end,
                     sizeMin = 10, sizeMax = 50,
-                })
+                }
+                if growthValues then
+                    opts.growthGet    = function() return DBVal(growthKey) or defaults[growthKey] end
+                    opts.growthSet    = function(v) DB()[growthKey] = v; RefreshAllSlots(); UpdatePreview() end
+                    opts.growthValues = growthValues
+                end
+                ShowCogPopup(self, opts)
             end)
             EllesmereUI.RegisterWidgetRefresh(function()
                 local off = CorePosOffDisabled(posKey)
@@ -4408,7 +4674,7 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         DB().castNameSize = v
                         for _, plate in pairs(plates) do
-                            if plate.castName then SetFSFont(plate.castName, v, "OUTLINE") end
+                            if plate.castName then SetFSFont(plate.castName, v, GetNPOutline()) end
                         end
                         UpdatePreview()
                       end },
@@ -4437,7 +4703,7 @@ initFrame:SetScript("OnEvent", function(self)
                       set=function(v)
                         DB().castTargetSize = v
                         for _, plate in pairs(plates) do
-                            if plate.castTarget then SetFSFont(plate.castTarget, v, "OUTLINE") end
+                            if plate.castTarget then SetFSFont(plate.castTarget, v, GetNPOutline()) end
                         end
                         UpdatePreview()
                       end },
@@ -5019,7 +5285,7 @@ initFrame:SetScript("OnEvent", function(self)
         local BAR_H = 20
         local SWATCH_SZ = 24
         local SWATCH_GAP = isHalf and 27 or 52
-        local fontPath = DBVal("font")
+        local fontPath = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
         local anchor = anchorFrame or parentRow
 
         local container = CreateFrame("Frame", nil, parentRow)
@@ -5092,11 +5358,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             local pctFS = textFrame:CreateFontString(nil, "OVERLAY")
             local initHpSz = 10
-            pctFS:SetFont(fontPath, initHpSz, "OUTLINE")
+            SetPVFont(pctFS, fontPath, initHpSz, GetNPOptOutline())
             pctFS:Hide()
 
             local numFS = textFrame:CreateFontString(nil, "OVERLAY")
-            numFS:SetFont(fontPath, initHpSz, "OUTLINE")
+            SetPVFont(numFS, fontPath, initHpSz, GetNPOptOutline())
             numFS:Hide()
 
             -- Full refresh: re-reads DB settings, repositions, updates text & values
@@ -5110,13 +5376,14 @@ initFrame:SetScript("OnEvent", function(self)
                         break
                     end
                 end
-                local curFont = DBVal("font")
+                local curFont = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
+                local curOutline = GetNPOptOutline()
 
                 -- Hide both FontStrings first
-                pctFS:SetFont(curFont, hpFS, "OUTLINE")
+                SetPVFont(pctFS, curFont, hpFS, curOutline)
                 pctFS:ClearAllPoints()
                 pctFS:Hide()
-                numFS:SetFont(curFont, hpFS, "OUTLINE")
+                SetPVFont(numFS, curFont, hpFS, curOutline)
                 numFS:ClearAllPoints()
                 numFS:Hide()
 
@@ -5284,7 +5551,7 @@ initFrame:SetScript("OnEvent", function(self)
             local cnc = (DB() and DB().castNameColor) or defaults.castNameColor
 
             local nameFS = cast:CreateFontString(nil, "OVERLAY")
-            nameFS:SetFont(fontPath, cns, "OUTLINE")
+            SetPVFont(nameFS, fontPath, cns, GetNPOptOutline())
             nameFS:SetPoint("LEFT", cast, "LEFT", 5, 0)
             nameFS:SetJustifyH("LEFT")
             nameFS:SetWordWrap(false)
@@ -5293,7 +5560,7 @@ initFrame:SetScript("OnEvent", function(self)
             nameFS:SetTextColor(cnc.r, cnc.g, cnc.b, 1)
 
             local targetFS = cast:CreateFontString(nil, "OVERLAY")
-            targetFS:SetFont(fontPath, cts, "OUTLINE")
+            SetPVFont(targetFS, fontPath, cts, GetNPOptOutline())
             targetFS:SetPoint("RIGHT", cast, "RIGHT", -3, 0)
             targetFS:SetJustifyH("RIGHT")
             targetFS:SetWordWrap(false)

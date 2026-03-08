@@ -1,0 +1,19 @@
+# Ignore everything by default (third-party addons)
+/*
+
+# Track our addons
+!/Ayije_CDM/
+!/Ayije_CDM_Keybind/
+!/Ayije_CDM_Options/
+!/EllesmereUI/
+!/EllesmereUIActionBars/
+!/EllesmereUIAuraBuffReminders/
+!/EllesmereUICursor/
+!/EllesmereUINameplates/
+!/EllesmereUIUnitFrames/
+!/EllesmereUIUnlockExtras/
+!/EllesmereUI_KRPatch/
+!/EllesmereUI_PageSwitch/
+!/SocialInfo/
+!/README.md
+!/.gitignore

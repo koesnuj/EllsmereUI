@@ -169,18 +169,40 @@ end
 --  Bootstrap — wait for EllesmereUIActionBars to finish creating bars
 --  EAB:OnEnable() → FinishSetup() runs at PLAYER_LOGIN.
 --  We hook at PLAYER_ENTERING_WORLD + 1s delay to guarantee bars exist.
+--  Combat-safe: defers Init() until out of combat if InCombatLockdown().
 -------------------------------------------------------------------------------
+local _initDone = false
 local bootstrap = CreateFrame("Frame")
 bootstrap:RegisterEvent("PLAYER_ENTERING_WORLD")
-bootstrap:SetScript("OnEvent", function(self)
+bootstrap:SetScript("OnEvent", function(self, event)
+    if event == "PLAYER_REGEN_ENABLED" then
+        self:UnregisterEvent("PLAYER_REGEN_ENABLED")
+        if not _initDone and _G[MAINBAR_FRAME] then
+            _initDone = true
+            Init()
+        end
+        return
+    end
     self:UnregisterEvent("PLAYER_ENTERING_WORLD")
     C_Timer.After(1, function()
+        if _initDone then return end
+        if InCombatLockdown() then
+            bootstrap:RegisterEvent("PLAYER_REGEN_ENABLED")
+            return
+        end
         if _G[MAINBAR_FRAME] then
+            _initDone = true
             Init()
         else
             -- Fallback: retry after another second (first-install path)
             C_Timer.After(2, function()
+                if _initDone then return end
+                if InCombatLockdown() then
+                    bootstrap:RegisterEvent("PLAYER_REGEN_ENABLED")
+                    return
+                end
                 if _G[MAINBAR_FRAME] then
+                    _initDone = true
                     Init()
                 end
             end)

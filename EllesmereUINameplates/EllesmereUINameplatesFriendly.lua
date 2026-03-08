@@ -3,6 +3,8 @@ local addon, ns = ...
 if not ns then return end
 
 local GetFont = ns.GetFont
+local GetNPOutline = ns.GetNPOutline
+local GetNPUseShadow = ns.GetNPUseShadow
 local SetFSFont = ns.SetFSFont
 local GetHealthBarHeight = ns.GetHealthBarHeight
 local GetFriendlyHealthBarHeight = ns.GetFriendlyHealthBarHeight
@@ -71,11 +73,11 @@ local function ApplyFriendlyFontOverride()
     local font = GetFont()
     if SystemFont_NamePlate and SystemFont_NamePlate.SetFont then
         local _, h, flags = SystemFont_NamePlate:GetFont()
-        SystemFont_NamePlate:SetFont(font, h or 9, flags or "")
+        SystemFont_NamePlate:SetFont(font, h or 9, flags or GetNPOutline())
     end
     if SystemFont_NamePlate_Outlined and SystemFont_NamePlate_Outlined.SetFont then
         local _, h, flags = SystemFont_NamePlate_Outlined:GetFont()
-        SystemFont_NamePlate_Outlined:SetFont(font, h or 9, flags or "OUTLINE")
+        SystemFont_NamePlate_Outlined:SetFont(font, h or 9, flags or GetNPOutline())
     end
     fontOverrideApplied = true
 end
@@ -105,9 +107,11 @@ local function ApplyFontToNameText(nameText)
     if not nameText or not nameText.SetFont then return end
     local font = GetFont()
     local _, h = nameText:GetFont()
-    nameText:SetFont(font, h or 9, "")
-    nameText:SetShadowOffset(1, -1)
-    nameText:SetShadowColor(0, 0, 0, 1)
+    nameText:SetFont(font, h or 9, GetNPOutline())
+    if GetNPUseShadow() then
+        nameText:SetShadowOffset(1, -1)
+        nameText:SetShadowColor(0, 0, 0, 1)
+    end
     if nameText.SetSnapToPixelGrid then
         nameText:SetSnapToPixelGrid(false)
     end
@@ -207,9 +211,11 @@ local function ShowNPCOverlay(nameplate, unit)
     overlay.name:SetMaxLines(0)
     -- Apply our font
     local font = GetFont()
-    overlay.name:SetFont(font, NPC_OVERLAY_FONT_SIZE, "")
-    overlay.name:SetShadowOffset(1, -1)
-    overlay.name:SetShadowColor(0, 0, 0, 1)
+    overlay.name:SetFont(font, NPC_OVERLAY_FONT_SIZE, GetNPOutline())
+    if GetNPUseShadow() then
+        overlay.name:SetShadowOffset(1, -1)
+        overlay.name:SetShadowColor(0, 0, 0, 1)
+    end
     if overlay.name.SetSnapToPixelGrid then
         overlay.name:SetSnapToPixelGrid(false)
     end
@@ -967,8 +973,6 @@ local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 initFrame:SetScript("OnEvent", function(self, event)
-    -- Skip all processing if user has disabled this addon
-    if EllesmereUIDB and EllesmereUIDB.disabledAddons and EllesmereUIDB.disabledAddons[addon] then return end
     if event == "PLAYER_LOGIN" then
         self:UnregisterEvent("PLAYER_LOGIN")
         ns.UpdateFriendlyNameplateSystem()

@@ -3,7 +3,7 @@
 --  Design-first scaffold: background, sidebar, header, content area, controls
 --  Meant to be shared across the entire EllesmereUI addon suite.
 -------------------------------------------------------------------------------
-if EllesmereUI then return end   -- already loaded by another addon in the suite
+if EllesmereUI and EllesmereUI._loaded then return end   -- already loaded by another addon in the suite
 
 local EUI_HOST_ADDON = ...
 
@@ -270,8 +270,9 @@ end
 -------------------------------------------------------------------------------
 --  Forward declarations
 -------------------------------------------------------------------------------
-local EllesmereUI = {}
+local EllesmereUI = _G.EllesmereUI or {}
 _G.EllesmereUI = EllesmereUI
+EllesmereUI._loaded = true
 EllesmereUI.GLOBAL_KEY = "_EUIGlobal"
 EllesmereUI.ADDON_ROSTER = ADDON_ROSTER
 EllesmereUI.LOCALE_FONT_FALLBACK = LOCALE_FONT_FALLBACK
@@ -288,6 +289,9 @@ local isSmoothing = false
 local smoothFrame
 local UpdateScrollThumb
 local suppressScrollRangeChanged = false
+-- Sidebar nav layout constants (set once in CreateMainFrame, used by RefreshSidebarStates)
+local _sidebarNavRowH = 50
+local _sidebarAddonNavTop = -228  -- NAV_TOP(-128) - NAV_ROW_H(50) * 2
 local lastHeaderPadded = false
 local skipScrollChildReanchor = false
 
@@ -762,9 +766,10 @@ do
         end
     end
 
-    -- Listen for UI_SCALE_CHANGED to recalculate mult
+    -- Listen for UI_SCALE_CHANGED and DISPLAY_SIZE_CHANGED to recalculate mult
     local scaleWatcher = CreateFrame("Frame")
     scaleWatcher:RegisterEvent("UI_SCALE_CHANGED")
+    scaleWatcher:RegisterEvent("DISPLAY_SIZE_CHANGED")
     scaleWatcher:SetScript("OnEvent", function()
         PP.UpdateMult()
     end)
@@ -1027,20 +1032,23 @@ function EllesmereUI.GetFontsDB()
     if not EllesmereUIDB then EllesmereUIDB = {} end
     if not EllesmereUIDB.fonts then
         EllesmereUIDB.fonts = {
-            globalEnabled = true,
-            global        = "Expressway",
-            actionBars    = "Expressway",
-            nameplates    = "Expressway",
-            unitFrames    = "Expressway",
-            cdm           = "Expressway",
-            resourceBars  = "Expressway",
-            auraBuff      = "Expressway",
-            raidFrames    = "Expressway",
-            minimapChat   = "Expressway",
-            extras        = "Expressway",
+            global      = "Expressway",
+            outlineMode = "shadow",
         }
     end
-    return EllesmereUIDB.fonts
+    -- Migrate legacy per-addon keys (no longer used)
+    local f = EllesmereUIDB.fonts
+    f.globalEnabled = nil
+    f.actionBars    = nil
+    f.nameplates    = nil
+    f.unitFrames    = nil
+    f.cdm           = nil
+    f.resourceBars  = nil
+    f.auraBuff      = nil
+    f.raidFrames    = nil
+    f.minimapChat   = nil
+    f.extras        = nil
+    return f
 end
 
 -- Resolve a font name to a full file path for a given addon
@@ -1059,26 +1067,38 @@ local function ResolveFontName(fontName)
 end
 EllesmereUI.ResolveFontName = ResolveFontName
 
--- Get the resolved font path for an addon key
--- addonKey: "actionBars", "nameplates", "unitFrames", "cdm", "resourceBars", "auraBuff", "raidFrames", "minimapChat"
+-- Get the resolved font path for an addon key (addonKey is ignored — always uses global font)
 function EllesmereUI.GetFontPath(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    local fontName
-    if db.globalEnabled then
-        fontName = db.global or "Expressway"
-    else
-        fontName = db[addonKey] or "Expressway"
-    end
-    return ResolveFontName(fontName)
+    return ResolveFontName(db.global or "Expressway")
 end
 
--- Get the font name (not path) for an addon key
+-- Get the font name (not path) for an addon key (addonKey is ignored — always uses global font)
 function EllesmereUI.GetFontName(addonKey)
     local db = EllesmereUI.GetFontsDB()
-    if db.globalEnabled then
-        return db.global or "Expressway"
+    return db.global or "Expressway"
+end
+
+-- Get the WoW font flag string for the current global outline mode.
+-- Returns: "OUTLINE", "THICKOUTLINE", or "" (none/shadow — caller should set shadow offset)
+function EllesmereUI.GetFontOutlineFlag()
+    local db = EllesmereUI.GetFontsDB()
+    local mode = db.outlineMode or "shadow"
+    if mode == "outline" then
+        return "OUTLINE"
+    elseif mode == "thick" then
+        return "THICKOUTLINE"
+    else
+        return ""
     end
-    return db[addonKey] or "Expressway"
+end
+
+-- Returns true when the current outline mode uses drop shadow instead of outline.
+-- Callers that set SetShadowOffset should check this to decide whether to show shadow.
+function EllesmereUI.GetFontUseShadow()
+    local db = EllesmereUI.GetFontsDB()
+    local mode = db.outlineMode or "shadow"
+    return mode == "none" or mode == "shadow"
 end
 
 -- Get class color (custom or default)
@@ -1207,7 +1227,7 @@ function EllesmereUI.ApplyColorsToOUF()
     end
     -- 5. Refresh action bar borders (class-colored borders read RAID_CLASS_COLORS)
     local ok, EAB = pcall(function()
-        return LibStub and LibStub("AceAddon-3.0"):GetAddon("EllesmereUIActionBars", true)
+        return EllesmereUI.Lite and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
     end)
     if ok and EAB and EAB.ApplyBorders and not InCombatLockdown() then
         EAB:ApplyBorders()
@@ -2468,6 +2488,7 @@ local function CreateMainFrame()
     local NAV_ICON_W  = 52    -- exact pixel width
     local NAV_ICON_H  = 37    -- exact pixel height
     local NAV_LEFT    = 20    -- left padding for icon
+    _sidebarNavRowH = NAV_ROW_H
     local NAV_TXT_GAP = 14    -- gap between icon and label
 
     -- Helper: create a 1px horizontal glow line on a sidebar button (TOP or BOTTOM edge)
@@ -2662,6 +2683,7 @@ local function CreateMainFrame()
 
     -- Addon offset: first addon starts two rows below (Unlock Mode + Global Settings)
     local ADDON_NAV_TOP = NAV_TOP - NAV_ROW_H * 2
+    _sidebarAddonNavTop = ADDON_NAV_TOP
 
     for i, info in ipairs(ADDON_ROSTER) do
         local btn = CreateFrame("Button", nil, sidebar)
@@ -2733,10 +2755,10 @@ local function CreateMainFrame()
                 end
                 return
             end
-            -- Show tooltip for user-disabled addons
-            if self._userDisabled then
+            -- Show tooltip for disabled (not enabled) addons
+            if self._notEnabled then
                 if EllesmereUI.ShowWidgetTooltip then
-                    EllesmereUI.ShowWidgetTooltip(self, "This option requires you to enable " .. (info.display) .. " in the Global Settings -> Enabled Addons tab")
+                    EllesmereUI.ShowWidgetTooltip(self, "Enable via Blizzard Addons List")
                 end
                 return
             end
@@ -2754,7 +2776,7 @@ local function CreateMainFrame()
         btn:SetScript("OnLeave", function(self)
             if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
             if self._comingSoon then return end
-            if self._userDisabled then return end
+            if self._notEnabled then return end
             hlTex:SetAlpha(0)
             self._hoverGlow:Hide()
             self._hoverIndicator:Hide()
@@ -2768,11 +2790,9 @@ local function CreateMainFrame()
         end)
         btn:SetScript("OnClick", function(self)
             if self._comingSoon then return end
-            if self._userDisabled then return end
+            if self._notEnabled then return end
             if self._loaded and modules[self._folder] then
                 EllesmereUI:SelectModule(self._folder)
-            elseif not self._loaded or not modules[self._folder] then
-                EllesmereUI:SelectUninstalledModule(self._folder)
             end
         end)
 
@@ -2925,8 +2945,7 @@ local function CreateMainFrame()
         C_Timer.After(0, function() SetOpacity(DEFAULT_A) end)
     end
 
-    -- Shared resource-gathering helper (used by both sidebar tracker and debug overlay)
-    -- Returns totalMem (KB) and a table of CPU totals keyed by metric enum
+    -- CPU metric keys for the sidebar performance tracker
     local CPU_METRICS = {}
     if Enum and Enum.AddOnProfilerMetric then
         CPU_METRICS = {
@@ -2938,15 +2957,11 @@ local function CreateMainFrame()
         }
     end
 
-    local function GatherEUIResources()
-        UpdateAddOnMemoryUsage()
-        local totalMem = 0
+    local function GatherEUICPU()
         local cpuByKey = {}
         for _, m in ipairs(CPU_METRICS) do cpuByKey[m.key] = 0 end
-
         for _, info in ipairs(ADDON_ROSTER) do
             if IsAddonLoaded(info.folder) then
-                totalMem = totalMem + (GetAddOnMemoryUsage(info.folder) or 0)
                 if C_AddOnProfiler and C_AddOnProfiler.GetAddOnMetric then
                     for _, m in ipairs(CPU_METRICS) do
                         cpuByKey[m.key] = cpuByKey[m.key] + (C_AddOnProfiler.GetAddOnMetric(info.folder, m.enum) or 0)
@@ -2954,62 +2969,58 @@ local function CreateMainFrame()
                 end
             end
         end
-        return totalMem, cpuByKey
+        return cpuByKey
     end
 
-    -- Resource usage tracker (memory + CPU for all EUI addons)
+    -- Resource usage tracker (CPU for all EUI addons)
     -- Only ticks when the options panel is visible (parented to sidebar,
     -- which is a descendant of mainFrame -- hidden frames don't fire OnUpdate)
 
-    local resMemText = MakeFont(sidebar, 10, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
-    resMemText:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -20, 18)
-    resMemText:SetJustifyH("RIGHT")
-    resMemText:SetAlpha(0.5)
-
     local resCpuText = MakeFont(sidebar, 10, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
-    resCpuText:SetPoint("BOTTOMRIGHT", resMemText, "TOPRIGHT", 0, 3)
+    resCpuText:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -20, 18)
     resCpuText:SetJustifyH("RIGHT")
     resCpuText:SetAlpha(0.5)
 
+    local resCpuLabel = MakeFont(sidebar, 10, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
+    resCpuLabel:SetPoint("BOTTOMRIGHT", resCpuText, "TOPRIGHT", 0, 3)
+    resCpuLabel:SetJustifyH("RIGHT")
+    resCpuLabel:SetAlpha(0.5)
+    resCpuLabel:SetText("CPU Usage:")
+
     local resPerfLabel = MakeFont(sidebar, 10, nil, TEXT_DIM.r, TEXT_DIM.g, TEXT_DIM.b, TEXT_DIM.a)
-    resPerfLabel:SetPoint("BOTTOMRIGHT", resCpuText, "TOPRIGHT", 0, 3)
+    resPerfLabel:SetPoint("BOTTOMRIGHT", resCpuLabel, "TOPRIGHT", 0, 11)
     resPerfLabel:SetJustifyH("RIGHT")
     resPerfLabel:SetAlpha(0.5)
-    resPerfLabel:SetText("All EUI Addons:")
+    resPerfLabel:SetText("All EUI Addons")
 
-    -- Forward declarations
+    local resDivider = sidebar:CreateTexture(nil, "ARTWORK")
+    resDivider:SetColorTexture(1, 1, 1, 0.15)
+    resDivider:SetHeight(1)
+    resDivider:SetPoint("BOTTOMRIGHT", resPerfLabel, "BOTTOMRIGHT", 0, -5)
+    resDivider:SetPoint("BOTTOMLEFT", resPerfLabel, "BOTTOMLEFT", 0, -5)
+
     local RES_UPDATE_INTERVAL = 5
-    local UpdateResourceText              -- assigned after definition below
+    local UpdateResourceText
 
     UpdateResourceText = function()
-        local totalMem, cpuByKey = GatherEUIResources()
-
-        if totalMem >= 1024 then
-            resMemText:SetText("Memory Usage: |cffffffff" .. string.format("%.1f MB", totalMem / 1024) .. "|r")
-        else
-            resMemText:SetText("Memory Usage: |cffffffff" .. string.format("%.0f KB", totalMem) .. "|r")
-        end
-
+        local cpuByKey = GatherEUICPU()
         local cpuVal = cpuByKey["RecentAvg"] or 0
         if C_AddOnProfiler and C_AddOnProfiler.GetAddOnMetric then
-            -- % of frame budget: cpuVal is ms/frame, frame budget is 1000/fps ms
             local fps = GetFramerate() or 0
             local pct = 0
             if fps > 0 then
                 pct = cpuVal / (1000 / fps) * 100
             end
-            resCpuText:SetText("CPU Usage: |cffffffff" .. string.format("%.3f MS (%.1f%%)", cpuVal, pct) .. "|r")
+            resCpuText:SetText("|cffffffff" .. string.format("%.3f MS (%.1f%%)", cpuVal, pct) .. "|r")
         else
-            resCpuText:SetText("CPU Usage: |cffffffffN/A|r")
+            resCpuText:SetText("|cffffffffN/A|r")
         end
     end
 
     local resUpdateFrame = CreateFrame("Frame", nil, sidebar)
-    -- Use C_Timer instead of OnUpdate: fires exactly once per interval,
-    -- zero per-frame overhead (OnUpdate fired every frame just to compare a timer).
     local resTicker
     resUpdateFrame:SetScript("OnShow", function()
-        UpdateResourceText()  -- immediate update on show
+        UpdateResourceText()
         if not resTicker then
             resTicker = C_Timer.NewTicker(RES_UPDATE_INTERVAL, UpdateResourceText)
         end
@@ -3371,9 +3382,9 @@ local function CreateMainFrame()
             if r ~= contentHeaderBg and r ~= contentHeaderDiv then regions[#regions + 1] = r end
         end
         if #children == 0 and #regions == 0 then return false end
-        -- Move children to stash so ClearContentHeaderInner can't touch them
+        -- Move children and regions to stash so ClearContentHeaderInner can't touch them
         for _, c in ipairs(children) do c:Hide(); c:SetParent(_chStash) end
-        for _, r in ipairs(regions) do r:Hide() end
+        for _, r in ipairs(regions) do r:Hide(); r:SetParent(_chStash) end
         _contentHeaderCache[cacheKey] = {
             children = children,
             regions  = regions,
@@ -3397,9 +3408,9 @@ local function CreateMainFrame()
         for _, r in ipairs(rg) do
             if r ~= contentHeaderBg and r ~= contentHeaderDiv then r:Hide() end
         end
-        -- Reparent cached children back to contentHeaderFrame and show
+        -- Reparent cached children and regions back to contentHeaderFrame and show
         for _, c in ipairs(entry.children) do c:SetParent(contentHeaderFrame); c:Show() end
-        for _, r in ipairs(entry.regions) do r:Show() end
+        for _, r in ipairs(entry.regions) do r:SetParent(contentHeaderFrame); r:Show() end
         contentHeaderFrame:Show()
         contentHeaderH = entry.height
         PanelPP.Height(contentHeaderFrame, entry.height)
@@ -3483,7 +3494,7 @@ local function CreateMainFrame()
         ApplyContentLayout()
     end
 
-    -- Expose cache functions for SelectPage / SelectUninstalledModule (outside CreateMainFrame scope)
+    -- Expose cache functions for SelectPage (outside CreateMainFrame scope)
     function EllesmereUI:SaveContentHeaderToCache(cacheKey)
         return SaveContentHeaderToCache(cacheKey)
     end
@@ -4721,215 +4732,6 @@ function EllesmereUI:SelectModule(folderName)
     end
 end
 
-function EllesmereUI:SelectUninstalledModule(folderName)
-    -- Save old page's state before switching
-    if activePage and activeModule then
-        local oldKey = activeModule .. "::" .. activePage
-        if _pageCache[oldKey] then
-            local rl = _pageCache[oldKey].refreshList
-            if not rl then rl = {}; _pageCache[oldKey].refreshList = rl end
-            for i = #rl, 1, -1 do rl[i] = nil end
-            for i = 1, #_widgetRefreshList do
-                rl[i] = _widgetRefreshList[i]
-            end
-        end
-        EllesmereUI:SaveContentHeaderToCache(oldKey)
-    end
-
-    -- Find display name and search name from roster
-    local displayName = folderName
-    local searchName = folderName
-    for _, info in ipairs(ADDON_ROSTER) do
-        if info.folder == folderName then
-            displayName = info.display
-            searchName = info.search_name or ("Ellesmere's " .. info.display)
-            break
-        end
-    end
-
-    activeModule = folderName
-    UpdateSidebarHighlight(folderName)
-    headerFrame._title:SetText(displayName)
-    headerFrame._desc:SetText("This addon is not currently installed or enabled.")
-    BuildTabs({ "Install" })
-    activePage = "Install"
-    UpdateTabHighlight("Install")
-
-    -- Clear content without orphaning cached page wrappers.
-    -- ClearContent() uses SetParent(nil) which corrupts the page cache;
-    -- instead, just hide everything and clear supplementary state.
-    -- Content header was already saved to cache above, so just hide it.
-    ClearWidgetRefreshList()
-    if EllesmereUI.HideContentHeader then
-        EllesmereUI:HideContentHeader()
-    elseif EllesmereUI.ClearContentHeader then
-        EllesmereUI:ClearContentHeader()
-    end
-    ResetRowCounters()
-    if EllesmereUI._copyPopup then EllesmereUI._copyPopup:Hide() end
-    if EllesmereUI._copyBackdrop then EllesmereUI._copyBackdrop:Hide() end
-    HideAllChildren(scrollChild)
-
-    -- Build install page content
-    local W = EllesmereUI.Widgets
-    local y = 0
-    local _, h
-
-    _, h = W:SectionHeader(contentFrame, "This addon is not currently installed or enabled", y);  y = y - h
-
-    -- Install instructions text with colored addon name
-    -- "Install by searching for " .. green name .. " in your favorite..."
-    -- Single wrapping FontString with inline color for the green addon name
-    local textY = y - 14
-    local greenHex = string.format("%02x%02x%02x", 
-        math.floor(ELLESMERE_GREEN.r * 255 + 0.5), 
-        math.floor(ELLESMERE_GREEN.g * 255 + 0.5), 
-        math.floor(ELLESMERE_GREEN.b * 255 + 0.5))
-    local installText = MakeFont(contentFrame, 16, nil, 1, 1, 1, 1)
-    installText:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", CONTENT_PAD + 10, textY)
-    installText:SetWidth(900 - 20)
-    installText:SetJustifyH("LEFT")
-    installText:SetWordWrap(true)
-    installText:SetSpacing(6)
-    installText:SetText("Install by searching for |cff" .. greenHex .. searchName .. "|r in your favorite WoW Addon manager: Curseforge, WoWup or Wago")
-
-    -- Invisible clickable name overlay -- positioned on top of the green text
-    -- We create a separate green-only FontString just to measure its width for the button
-    local nameText = MakeFont(contentFrame, 18, nil, ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b)
-    nameText:SetText(searchName)
-    nameText:SetAlpha(0)  -- invisible, just for measuring and anchor
-
-    -- Measure prefix width to position the clickable area
-    local prefixMeasure = MakeFont(contentFrame, 18, nil, 1, 1, 1)
-    prefixMeasure:SetText("Install by searching for ")
-    local prefixW = prefixMeasure:GetStringWidth() or 200
-    prefixMeasure:SetAlpha(0)
-
-    local nameW = nameText:GetStringWidth() or 100
-
-    local nameBtn = CreateFrame("Button", nil, contentFrame)
-    nameBtn:SetSize(nameW, 22)
-    nameBtn:SetPoint("TOPLEFT", contentFrame, "TOPLEFT", CONTENT_PAD + prefixW - 12, textY + 3)
-    nameBtn:SetFrameLevel(contentFrame:GetFrameLevel() + 5)
-    nameBtn:SetScript("OnEnter", function()
-        installText:SetText("Install by searching for |cffffffff" .. searchName .. "|r in your favorite WoW Addon manager: Curseforge, WoWup or Wago")
-    end)
-    nameBtn:SetScript("OnLeave", function()
-        installText:SetText("Install by searching for |cff" .. greenHex .. searchName .. "|r in your favorite WoW Addon manager: Curseforge, WoWup or Wago")
-    end)
-
-    -- Reusable copy-to-clipboard popup
-    local copyPopup, copyBackdrop
-    local function HideCopyPopup()
-        if copyPopup then copyPopup:Hide() end
-        if copyBackdrop then copyBackdrop:Hide() end
-    end
-    local function DoCopyToClipboard()
-        -- Create the popup once, reuse it
-        if not copyPopup then
-            -- Fullscreen invisible backdrop to catch outside clicks
-            copyBackdrop = CreateFrame("Button", nil, UIParent)
-            copyBackdrop:SetFrameStrata("DIALOG")
-            copyBackdrop:SetFrameLevel(499)
-            copyBackdrop:SetAllPoints(UIParent)
-            local bdTex = copyBackdrop:CreateTexture(nil, "BACKGROUND")
-            bdTex:SetAllPoints()
-            bdTex:SetColorTexture(0, 0, 0, 0.20)
-            -- Fade-in animation
-            local fadeIn = copyBackdrop:CreateAnimationGroup()
-            fadeIn:SetToFinalAlpha(true)
-            local alpha = fadeIn:CreateAnimation("Alpha")
-            alpha:SetFromAlpha(0)
-            alpha:SetToAlpha(1)
-            alpha:SetDuration(0.2)
-            copyBackdrop._fadeIn = fadeIn
-            copyBackdrop:RegisterForClicks("AnyUp")
-            copyBackdrop:SetScript("OnClick", HideCopyPopup)
-            copyBackdrop:Hide()
-
-            copyPopup = CreateFrame("Frame", nil, UIParent)
-            copyPopup:SetFrameStrata("DIALOG")
-            copyPopup:SetFrameLevel(500)
-            copyPopup:SetSize(340, 72)
-            local popupFade = copyPopup:CreateAnimationGroup()
-            popupFade:SetToFinalAlpha(true)
-            local popupAlpha = popupFade:CreateAnimation("Alpha")
-            popupAlpha:SetFromAlpha(0)
-            popupAlpha:SetToAlpha(1)
-            popupAlpha:SetDuration(0.2)
-            copyPopup._fadeIn = popupFade
-
-            local bg = SolidTex(copyPopup, "BACKGROUND", DARK_BG.r, DARK_BG.g, DARK_BG.b, 0.97)
-            bg:SetAllPoints()
-            MakeBorder(copyPopup, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.15)
-
-            local hint = MakeFont(copyPopup, 11, nil, TEXT_SECTION.r, TEXT_SECTION.g, TEXT_SECTION.b, TEXT_SECTION.a)
-            hint:SetPoint("TOP", copyPopup, "TOP", 0, -10)
-            hint:SetText("Press Ctrl+C to copy, then Escape to close")
-
-            local eb = CreateFrame("EditBox", nil, copyPopup)
-            eb:SetSize(300, 26)
-            eb:SetPoint("TOP", hint, "BOTTOM", 0, -8)
-            eb:SetFontObject(GameFontHighlight)
-            eb:SetAutoFocus(false)
-            eb:SetJustifyH("CENTER")
-
-            local ebBg = SolidTex(eb, "BACKGROUND", 0.10, 0.12, 0.16, 1)
-            ebBg:SetPoint("TOPLEFT", -6, 4)
-            ebBg:SetPoint("BOTTOMRIGHT", 6, -4)
-            MakeBorder(eb, BORDER_COLOR.r, BORDER_COLOR.g, BORDER_COLOR.b, 0.02)
-
-            eb:SetScript("OnEscapePressed", function(self)
-                self:ClearFocus()
-                HideCopyPopup()
-            end)
-            -- Re-highlight text if user clicks inside the edit box
-            eb:SetScript("OnMouseUp", function(self)
-                self:HighlightText()
-            end)
-
-            -- Clicking the popup background itself (not the editbox) re-focuses and re-highlights
-            copyPopup:EnableMouse(true)
-            copyPopup:SetScript("OnMouseDown", function()
-                copyPopup._eb:SetFocus()
-                copyPopup._eb:HighlightText()
-            end)
-
-            copyPopup._eb = eb
-            EllesmereUI._copyPopup = copyPopup
-            EllesmereUI._copyBackdrop = copyBackdrop
-        end
-
-        copyPopup._eb:SetText(searchName)
-        copyPopup:ClearAllPoints()
-        copyPopup:SetPoint("BOTTOM", nameBtn, "TOP", 0, 8)
-        copyBackdrop:SetAlpha(0)
-        copyBackdrop:Show()
-        copyBackdrop._fadeIn:Play()
-        copyPopup:SetAlpha(0)
-        copyPopup:Show()
-        copyPopup._fadeIn:Play()
-        copyPopup._eb:SetFocus()
-        copyPopup._eb:HighlightText()
-    end
-
-    nameBtn:SetScript("OnClick", function() DoCopyToClipboard() end)
-
-    -- Account for text wrapping height
-    local textHeight = installText:GetStringHeight() or 22
-    y = y - math.max(50, textHeight + 20)
-
-    -- Cap content height to visible area so install tab never scrolls
-    local visibleH = scrollFrame:GetHeight()
-    contentFrame:SetHeight(math.min(math.abs(y) + 30, visibleH))
-    if scrollFrame and scrollFrame.SetVerticalScroll then
-        scrollTarget = 0
-        isSmoothing = false
-        if smoothFrame then smoothFrame:Hide() end
-        scrollFrame:SetVerticalScroll(0)
-    end
-end
-
 -------------------------------------------------------------------------------
 --  Show / Hide / Toggle
 -------------------------------------------------------------------------------
@@ -4953,61 +4755,67 @@ local function RefreshSidebarStates()
     end
 
     local firstLoaded = nil
-    local disabledAddons = EllesmereUIDB and EllesmereUIDB.disabledAddons or {}
+
+    -- Two-pass: enabled addons first (roster order), disabled addons after
+    local enabledList = {}
+    local disabledList = {}
     for _, info in ipairs(ADDON_ROSTER) do
+        local loaded = info.alwaysLoaded or IsAddonLoaded(info.folder)
+        if loaded then
+            enabledList[#enabledList + 1] = info
+        else
+            disabledList[#disabledList + 1] = info
+        end
+    end
+
+    local rowIndex = 0
+    for _, info in ipairs(enabledList) do
+        rowIndex = rowIndex + 1
         local folder = info.folder
         local btn = sidebarButtons[folder]
         if not btn then break end
-        -- Party Mode is baked into all addons; always treat it as loaded
-        local loaded = info.alwaysLoaded or IsAddonLoaded(folder)
-        local userDisabled = loaded and disabledAddons[folder] == true
-        btn._loaded = loaded
-        btn._userDisabled = userDisabled
-        if loaded and not userDisabled then
-            btn._dlIcon:Hide()
-            if folder == activeModule then
-                btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
-                btn._icon:SetTexture(btn._iconOff)
-                btn._icon:SetDesaturated(false)
-                btn._icon:SetAlpha(NAV_SELECTED_ICON_A)
-                btn._iconGlow:Show()
-            else
-                btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
-                btn._icon:SetTexture(btn._iconOff)
-                btn._icon:SetDesaturated(false)
-                btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
-                btn._iconGlow:Hide()
-            end
-            if not firstLoaded then firstLoaded = folder end
-        elseif userDisabled then
-            -- Installed but user-disabled: show disabled coloring, no download icon
-            btn._dlIcon:Hide()
-            btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        btn._loaded = true
+        btn._notEnabled = false
+        btn._dlIcon:Hide()
+        if folder == activeModule then
+            btn._label:SetTextColor(NAV_SELECTED_TEXT.r, NAV_SELECTED_TEXT.g, NAV_SELECTED_TEXT.b, NAV_SELECTED_TEXT.a)
             btn._icon:SetTexture(btn._iconOff)
-            btn._icon:SetDesaturated(true)
-            btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
-            btn._iconGlow:Hide()
-            btn._indicator:Hide()
-            btn._glow:Hide()
-            btn._glowTop:Hide()
-            btn._glowBot:Hide()
+            btn._icon:SetDesaturated(false)
+            btn._icon:SetAlpha(NAV_SELECTED_ICON_A)
+            btn._iconGlow:Show()
         else
-            btn._dlIcon:Show()
-            btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
+            btn._label:SetTextColor(NAV_ENABLED_TEXT.r, NAV_ENABLED_TEXT.g, NAV_ENABLED_TEXT.b, NAV_ENABLED_TEXT.a)
             btn._icon:SetTexture(btn._iconOff)
-            btn._icon:SetDesaturated(true)
-            btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
+            btn._icon:SetDesaturated(false)
+            btn._icon:SetAlpha(NAV_ENABLED_ICON_A)
             btn._iconGlow:Hide()
-            btn._indicator:Hide()
-            btn._glow:Hide()
-            btn._glowTop:Hide()
-            btn._glowBot:Hide()
         end
+        if not firstLoaded then firstLoaded = folder end
     end
-    -- Default to Global Settings if no module is active (or active module lost)
-    -- Also reset if the active module is a user-disabled addon
-    local activeDisabled = activeModule and disabledAddons[activeModule] == true
-    if not activeModule or activeDisabled then
+    for _, info in ipairs(disabledList) do
+        rowIndex = rowIndex + 1
+        local folder = info.folder
+        local btn = sidebarButtons[folder]
+        if not btn then break end
+        btn:ClearAllPoints()
+        btn:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 0, _sidebarAddonNavTop - (rowIndex - 1) * _sidebarNavRowH)
+        btn._loaded = false
+        btn._notEnabled = true
+        btn._dlIcon:Hide()
+        btn._label:SetTextColor(NAV_DISABLED_TEXT.r, NAV_DISABLED_TEXT.g, NAV_DISABLED_TEXT.b, NAV_DISABLED_TEXT.a)
+        btn._icon:SetTexture(btn._iconOff)
+        btn._icon:SetDesaturated(true)
+        btn._icon:SetAlpha(NAV_DISABLED_ICON_A)
+        btn._iconGlow:Hide()
+        btn._indicator:Hide()
+        btn._glow:Hide()
+        btn._glowTop:Hide()
+        btn._glowBot:Hide()
+    end
+    -- Default to Global Settings if no module is active
+    if not activeModule then
         activeModule = nil
         if modules["_EUIGlobal"] then
             EllesmereUI:SelectModule("_EUIGlobal")
@@ -5142,7 +4950,6 @@ function EllesmereUI:GetScrollFrame() return scrollFrame end
 function EllesmereUI:GetActivePage() return activePage end
 
 --- Apply a user-defined panel scale on top of the pixel-perfect base scale.
---- Apply a user-defined panel scale on top of the pixel-perfect base scale.
 --- @param userScale number  multiplier (1.0 = default, 0.5–1.5 range)
 do
     local scaleAnimFrame = CreateFrame("Frame")
@@ -5190,7 +4997,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "2.9"
+EllesmereUI.VERSION = "3.4.5"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -5252,16 +5059,16 @@ end
 
 --------------------------------------------------------------------------------
 --  Global Incompatible Addon Detection
---  Runs once across the entire suite. Each entry maps a third-party addon to
---  the Ellesmere addon(s) it conflicts with. "all" means every addon except
---  EllesmereUIPartyMode.
+--  Runs once per session. Non-ElvUI conflicts always show. ElvUI is a
+--  one-off warning: once dismissed while it is the ONLY conflict, it is
+--  suppressed forever. If other conflicts are also present, ElvUI shows too
+--  and the one-off flag is not consumed.
 --------------------------------------------------------------------------------
 if not _G._EUI_ConflictChecked then
     _G._EUI_ConflictChecked = true
     C_Timer.After(2, function()
         local IsLoaded = C_AddOns and C_AddOns.IsAddOnLoaded
         if not IsLoaded then return end
-        local euiAddons = _G._EUI_AddonVersions or {}
 
         -- conflict list: { addon, label, targets, message }
         -- targets = "all" or a table of Ellesmere folder names
@@ -5284,9 +5091,16 @@ if not _G._EUI_ConflictChecked then
 
         local exempt = { EllesmereUIPartyMode = true }
 
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        if not EllesmereUIDB.dismissedConflicts then EllesmereUIDB.dismissedConflicts = {} end
+        local dismissed = EllesmereUIDB.dismissedConflicts
+
+        -- Collect all active conflicts.
+        -- ElvUI is filtered out if it has been permanently dismissed AND it
+        -- would be the only conflict showing (i.e. no other conflicts exist).
+        local pending = {}
         for _, entry in ipairs(conflicts) do
             if entry.addon ~= EUI_HOST_ADDON and IsLoaded(entry.addon) then
-                -- Find which of our addons this conflicts with
                 local affected = {}
                 if entry.targets == "all" then
                     local allTargets = {
@@ -5307,30 +5121,56 @@ if not _G._EUI_ConflictChecked then
                     end
                 end
                 if #affected > 0 then
-                    -- Build a readable list of our affected addons
-                    local names = {}
-                    for _, a in ipairs(affected) do
-                        names[#names + 1] = a:gsub("^EllesmereUI", "")
-                    end
-                    local msg = entry.message or (
-                        entry.label .. " is not compatible with EllesmereUI " .. table.concat(names, ", ")
-                        .. ". Running both at the same time may cause errors or unexpected behavior."
-                        .. "\n\nPlease disable one of them."
-                    )
-                    if EllesmereUI.ShowConfirmPopup then
-                        EllesmereUI:ShowConfirmPopup({
-                            title       = "Incompatible Addon Detected",
-                            message     = msg,
-                            confirmText = "Okay",
-                            cancelText  = "Dismiss",
-                        })
-                    else
-                        print("|cffff6060[EllesmereUI]|r " .. msg:gsub("\n", " "))
-                    end
-                    break  -- one popup at a time, don't spam
+                    pending[#pending + 1] = { entry = entry, affected = affected }
                 end
             end
         end
+
+        -- If ElvUI is the ONLY conflict and it has been dismissed, suppress it.
+        if #pending == 1 and pending[1].entry.addon == "ElvUI" and dismissed["ElvUI"] then
+            return
+        end
+
+        -- Show one popup at a time.
+        -- Non-ElvUI: never permanently dismissed (always shows next session).
+        -- ElvUI: permanently dismissed only when it was the sole conflict.
+        local pendingIndex = 0
+        local function ShowNextConflict()
+            pendingIndex = pendingIndex + 1
+            local item = pending[pendingIndex]
+            if not item then return end
+            local entry, affected = item.entry, item.affected
+            local names = {}
+            for _, a in ipairs(affected) do
+                names[#names + 1] = a:gsub("^EllesmereUI", "")
+            end
+            local msg = entry.message or (
+                entry.label .. " is not compatible with EllesmereUI " .. table.concat(names, ", ")
+                .. ". Running both at the same time may cause errors or unexpected behavior."
+                .. "\n\nPlease disable one of them."
+            )
+            local function onDismiss()
+                -- Only permanently dismiss ElvUI, and only when it is the sole conflict
+                if entry.addon == "ElvUI" and #pending == 1 then
+                    dismissed["ElvUI"] = true
+                end
+                ShowNextConflict()
+            end
+            if EllesmereUI.ShowConfirmPopup then
+                EllesmereUI:ShowConfirmPopup({
+                    title       = "Incompatible Addon Detected",
+                    message     = msg,
+                    confirmText = "Okay",
+                    cancelText  = "Don't show again",
+                    onConfirm   = onDismiss,
+                    onCancel    = onDismiss,
+                })
+            else
+                print("|cffff6060[EllesmereUI]|r " .. msg:gsub("\n", " "))
+                ShowNextConflict()
+            end
+        end
+        ShowNextConflict()
     end)
 end
 
@@ -5345,8 +5185,8 @@ SlashCmdList.EUIOPTIONS = function()
     EllesmereUI:Toggle()
 end
 
--- Quick-access: /e opens global settings
-SLASH_EUIQUICK1 = "/e"
+-- Quick-access: /ee opens global settings
+SLASH_EUIQUICK1 = "/ee"
 SlashCmdList.EUIQUICK = function()
     if InCombatLockdown() then
         print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
@@ -5415,8 +5255,6 @@ function EllesmereUI:ShowModule(folderName)
     ShowSidebarUnlockTip()
     if modules[folderName] then
         self:SelectModule(folderName)
-    elseif not modules[folderName] then
-        self:SelectUninstalledModule(folderName)
     end
 end
 
@@ -5582,10 +5420,12 @@ do
                 statsFrame:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x or 0, pos.y or 0)
             end
         end
-        statsFrame:RegisterEvent("UNIT_STATS")
+        statsFrame:RegisterUnitEvent("UNIT_STATS", "player")
         statsFrame:RegisterEvent("COMBAT_RATING_UPDATE")
         statsFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
-        statsFrame:SetScript("OnEvent", function() UpdateSecondaryStats() end)
+        statsFrame:SetScript("OnEvent", function()
+            UpdateSecondaryStats()
+        end)
         statsFrame:Show()
         UpdateSecondaryStats()
     end
@@ -5597,6 +5437,142 @@ do
             ApplySecondaryStats()
         end
         return statsFrame
+    end
+end
+
+-------------------------------------------------------------------------------
+--  Native Minimap Button (no library dependencies)
+-------------------------------------------------------------------------------
+do
+    local ICON_PATH = "Interface\\AddOns\\EllesmereUI\\media\\eg-logo.tga"
+    local BUTTON_SIZE = 32
+    local MINIMAP_RADIUS = 80
+    local btn
+
+    local function GetAngle()
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        return EllesmereUIDB.minimapButtonAngle or 220
+    end
+
+    local function SetAngle(angle)
+        if not EllesmereUIDB then EllesmereUIDB = {} end
+        EllesmereUIDB.minimapButtonAngle = angle
+    end
+
+    local function UpdatePosition()
+        if not btn then return end
+        local angle = math.rad(GetAngle())
+        -- Compute radius from actual minimap dimensions so it works with any shape/size
+        local mw, mh = Minimap:GetWidth(), Minimap:GetHeight()
+        local radius = (math.max(mw, mh) / 2) + 5
+        local x = math.cos(angle) * radius
+        local y = math.sin(angle) * radius
+        btn:ClearAllPoints()
+        btn:SetPoint("CENTER", Minimap, "CENTER", x, y)
+    end
+
+    function EllesmereUI.CreateMinimapButton()
+        if btn then return btn end
+
+        btn = CreateFrame("Button", "EllesmereUIMinimapButton", Minimap)
+        btn:SetSize(BUTTON_SIZE, BUTTON_SIZE)
+        btn:SetFrameStrata("MEDIUM")
+        btn:SetFrameLevel(8)
+        btn:SetClampedToScreen(true)
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp", "MiddleButtonUp")
+        btn:RegisterForDrag("LeftButton")
+        btn:SetMovable(true)
+
+        -- Background fill (black circle behind the icon)
+        local bg = btn:CreateTexture(nil, "BACKGROUND")
+        bg:SetSize(25, 25)
+        bg:SetPoint("CENTER", 0, 0)
+        bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+        bg:SetVertexColor(0, 0, 0, 1)
+
+        -- Icon
+        local icon = btn:CreateTexture(nil, "ARTWORK")
+        icon:SetSize(17, 17)
+        icon:SetPoint("CENTER", 0, 0)
+        icon:SetTexture(ICON_PATH)
+
+        -- Border overlay (standard minimap button look — offset to compensate for built-in padding)
+        local overlay = btn:CreateTexture(nil, "OVERLAY")
+        overlay:SetSize(53, 53)
+        overlay:SetPoint("TOPLEFT", btn, "TOPLEFT", 0, 0)
+        overlay:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+        -- Highlight (circular, not square)
+        btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+        -- Click handler
+        btn:SetScript("OnClick", function(_, button)
+            if InCombatLockdown() then return end
+            if button == "LeftButton" then
+                if EllesmereUI then EllesmereUI:Toggle() end
+            elseif button == "RightButton" then
+                if EllesmereUI and EllesmereUI._openUnlockMode then
+                    EllesmereUI._openUnlockMode()
+                end
+            elseif button == "MiddleButton" then
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.showMinimapButton = false
+                btn:Hide()
+                local rl = EllesmereUI and EllesmereUI._widgetRefreshList
+                if rl then for i = 1, #rl do rl[i]() end end
+            end
+        end)
+
+        -- Tooltip
+        btn:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+            GameTooltip:AddLine("|cff0cd29fEllesmereUI|r")
+            GameTooltip:AddLine("|cff0cd29dLeft-click:|r |cffE0E0E0Toggle EllesmereUI|r")
+            GameTooltip:AddLine("|cff0cd29dRight-click:|r |cffE0E0E0Enter Unlock Mode|r")
+            GameTooltip:AddLine("|cff0cd29dMiddle-click:|r |cffE0E0E0Hide Minimap Button|r")
+            GameTooltip:Show()
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- Drag to reposition around minimap
+        btn:SetScript("OnDragStart", function(self)
+            self:StartMoving()
+            self:SetScript("OnUpdate", function()
+                local mx, my = Minimap:GetCenter()
+                local cx, cy = GetCursorPosition()
+                local scale = Minimap:GetEffectiveScale()
+                cx, cy = cx / scale, cy / scale
+                local angle = math.deg(math.atan2(cy - my, cx - mx))
+                SetAngle(angle)
+                UpdatePosition()
+            end)
+        end)
+        btn:SetScript("OnDragStop", function(self)
+            self:StopMovingOrSizing()
+            self:SetScript("OnUpdate", nil)
+            UpdatePosition()
+        end)
+
+        UpdatePosition()
+
+        -- Respect saved visibility
+        if EllesmereUIDB and EllesmereUIDB.showMinimapButton == false then
+            btn:Hide()
+        else
+            btn:Show()
+        end
+
+        _EllesmereUI_MinimapRegistered = true
+        return btn
+    end
+
+    function EllesmereUI.ShowMinimapButton()
+        if not btn then EllesmereUI.CreateMinimapButton() end
+        if btn then btn:Show() end
+    end
+
+    function EllesmereUI.HideMinimapButton()
+        if btn then btn:Hide() end
     end
 end
 
@@ -5617,6 +5593,9 @@ initFrame:SetScript("OnEvent", function(self, event)
 
     -- PLAYER_LOGIN: register demo modules (UI is built lazily on first open)
     self:UnregisterEvent("PLAYER_LOGIN")
+
+    -- Create native minimap button
+    EllesmereUI.CreateMinimapButton()
 
     -- Apply streamer settings
     if EllesmereUI._applyGuildChatPrivacy then EllesmereUI._applyGuildChatPrivacy() end

@@ -6,6 +6,9 @@
 local ADDON_NAME, ns = ...
 local EAB = ns.EAB
 
+local function GetEABOptOutline() return EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag() or "" end
+local function GetEABOptUseShadow() return EllesmereUI.GetFontUseShadow and EllesmereUI.GetFontUseShadow() or true end
+
 -------------------------------------------------------------------------------
 --  Section / page names  (edit here to rename everywhere)
 -------------------------------------------------------------------------------
@@ -272,7 +275,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Label
             local label = editOverlayFrame:CreateFontString(nil, "OVERLAY")
             local fontPath = EllesmereUI and EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF"
-            label:SetFont(fontPath, 10, "OUTLINE")
+            label:SetFont(fontPath, 10, GetEABOptOutline())
             label:SetTextColor(1, 1, 1, 0.75)
             label:SetPoint("CENTER")
             label:SetWordWrap(false)
@@ -417,6 +420,14 @@ initFrame:SetScript("OnEvent", function(self)
             return math.floor(val * s + 0.5) / s
         end
 
+        -- Scale-aware snap: snaps val to the pixel grid at pf's scale * barScale.
+        -- Mirrors SnapForScale from the real bars so button sizes stay pixel-perfect
+        -- at every barScale value, preventing jumpy borders during slider drags.
+        local function SnapS(val, scale)
+            local s = pf:GetEffectiveScale() * (scale or 1)
+            return math.floor(val * s + 0.5) / s
+        end
+
         -- Disable WoW's automatic pixel snapping on a texture
         local function UnsnapTex(tex)
             if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false); tex:SetTexelSnappingBias(0) end
@@ -447,6 +458,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Keybind text (top-right, mirrors real button HotKey position)
             local keybindFS = bf:CreateFontString(nil, "OVERLAY")
             keybindFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
+            keybindFS:SetShadowOffset(0, 0)
             keybindFS:SetTextColor(1, 1, 1)
             keybindFS:SetPoint("TOPRIGHT", bf, "TOPRIGHT", -1, -3)
             keybindFS:SetPoint("TOPLEFT", bf, "TOPLEFT", 4, -3)
@@ -457,6 +469,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Count / charges text (bottom-right, mirrors real button Count position)
             local countFS = bf:CreateFontString(nil, "OVERLAY")
             countFS:SetFont(DEFAULT_FONT, 12, "OUTLINE")
+            countFS:SetShadowOffset(0, 0)
             countFS:SetTextColor(1, 1, 1)
             countFS:SetPoint("BOTTOMRIGHT", bf, "BOTTOMRIGHT", -1, 4)
             countFS:SetText("")
@@ -467,41 +480,12 @@ initFrame:SetScript("OnEvent", function(self)
                 borders = { bT, bB, bL, bR },
                 keybind = keybindFS,
                 count   = countFS,
-                -- Animation state (nil = not yet initialized)
-                targetX = nil, targetY = nil, targetW = nil, targetH = nil,
-                currentX = nil, currentY = nil, currentW = nil, currentH = nil,
             }
         end
 
         -- Preview background texture (behind all buttons)
         local previewBG = pf:CreateTexture(nil, "BACKGROUND", nil, -1)
         previewBG:Hide()
-
-        -- Animation OnUpdate handler for smooth preview transitions
-        local ANIM_SPEED = 12  -- lerp factor per second (~0.2s to settle)
-        local animOnUpdate = function(self, elapsed)
-            local t = math.min(1, ANIM_SPEED * elapsed)
-            local anyMoving = false
-            local s = self:GetEffectiveScale()
-            local function SnapAnim(val) return math.floor(val * s + 0.5) / s end
-            for i = 1, maxBtns do
-                local e = buttons[i]
-                if e.targetX and e.currentX then
-                    e.currentX = e.currentX + (e.targetX - e.currentX) * t
-                    e.currentY = e.currentY + (e.targetY - e.currentY) * t
-                    e.currentW = e.currentW + (e.targetW - e.currentW) * t
-                    e.currentH = e.currentH + (e.targetH - e.currentH) * t
-                    e.frame:SetSize(SnapAnim(e.currentW), SnapAnim(e.currentH))
-                    e.frame:ClearAllPoints()
-                    e.frame:SetPoint("TOPLEFT", self, "TOPLEFT", SnapAnim(e.currentX), SnapAnim(e.currentY))
-                    if math.abs(e.currentX - e.targetX) > 0.1 or
-                       math.abs(e.currentW - e.targetW) > 0.1 then
-                        anyMoving = true
-                    end
-                end
-            end
-            if not anyMoving then self:SetScript("OnUpdate", nil) end
-        end
 
         -- Store barFrame ref and base size for Update
         pf._barFrame  = barFrame
@@ -511,7 +495,6 @@ initFrame:SetScript("OnEvent", function(self)
         pf._blizzEditScale = blizzEditScale
         pf._buttons   = buttons
         pf._previewBG = previewBG
-        pf._lastShape = nil  -- track shape changes for instant snap
 
         -- The Update method ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â reads current DB + Blizzard state, applies it --
         pf.Update = function(self)
@@ -533,32 +516,24 @@ initFrame:SetScript("OnEvent", function(self)
                 numVisible = ovIcons
             end
 
+            -- Stance bar: ignore icon count setting, use actual shapeshift form count
+            if info.isStance then
+                numVisible = GetNumShapeshiftForms() or info.count
+                if numVisible < 1 then numVisible = info.count end
+            end
 
-            -- Multi-row layout: show all rows matching the real bar
+
+            -- Multi-row layout: show all rows matching the real bar (capped at 3 in preview)
             local numRows = settings.numRows or 1
             local ovRows = settings.overrideNumRows
             if ovRows and ovRows > 0 then numRows = ovRows end
+            if numRows > 3 then numRows = 3 end
             local stride = math.ceil(numVisible / numRows)
             local previewCount = numVisible
-            -- Read showEmpty early so the leftmost/rightmost block can reference it
-            local showEmpty = settings.alwaysShowButtons
-            if showEmpty == nil then showEmpty = true end
+            -- Preview always shows all slots regardless of alwaysShowButtons setting
+            local showEmpty = true
 
-            -- When alwaysShowButtons is off, size preview to rightmost action slot
-            -- and track leftmost for proper centering
-            -- For multi-row, leftmost is always 1 (row/col math requires contiguous range).
-            -- When alwaysShowButtons is off, trim trailing empty slots from the last row.
             local leftmost = 1
-            if not showEmpty then
-                local last = 0
-                for i = 1, previewCount do
-                    local realBtn = _G[info.buttonPrefix .. i]
-                    if realBtn and ns.ButtonHasAction(realBtn, info.buttonPrefix) then
-                        last = i
-                    end
-                end
-                if last > 0 then previewCount = last end
-            end
             -- Read settings
             local spacing   = settings.buttonPadding or 2
             -- Resolve border thickness from dropdown
@@ -596,28 +571,20 @@ initFrame:SetScript("OnEvent", function(self)
                 if ct then local cc = RAID_CLASS_COLORS[ct]; if cc then shapeBrdR, shapeBrdG, shapeBrdB = cc.r, cc.g, cc.b end end
             end
 
-            local scaledBtnW = Snap(btnW * (self._blizzEditScale or 1) * barScale)
-            local scaledBtnH = Snap(btnH * (self._blizzEditScale or 1) * barScale)
+            local scaledBtnW = SnapS(btnW * (self._blizzEditScale or 1) * barScale, barScale)
+            local scaledBtnH = SnapS(btnH * (self._blizzEditScale or 1) * barScale, barScale)
             -- Expand button size for custom shapes (mirrors SHAPE_BTN_EXPAND in main file)
             if btnShape ~= "none" and btnShape ~= "cropped" then
-                local shapeExp = Snap(ns.SHAPE_BTN_EXPAND * (self._blizzEditScale or 1) * barScale)
+                local shapeExp = SnapS(ns.SHAPE_BTN_EXPAND * (self._blizzEditScale or 1) * barScale, barScale)
                 scaledBtnW = scaledBtnW + shapeExp
                 scaledBtnH = scaledBtnH + shapeExp
             end
             -- Shrink button height for "cropped" mode (10% top + 10% bottom)
             if btnShape == "cropped" then
-                scaledBtnH = Snap(scaledBtnH * 0.80)
+                scaledBtnH = SnapS(scaledBtnH * 0.80, barScale)
             end
 
-            -- Force immediate snap when shape changes (prevents stale animation targets)
-            if self._lastShape ~= btnShape then
-                self._lastShape = btnShape
-                for i = 1, maxBtns do
-                    buttons[i].currentX = nil
-                end
-                self:SetScript("OnUpdate", nil)
-            end
-            local scaledPad  = Snap(spacing * (self._blizzEditScale or 1) * barScale)
+            local scaledPad  = SnapS(spacing * (self._blizzEditScale or 1) * barScale, barScale)
 
             -- Scale font sizes proportionally
             local totalScale = (self._blizzEditScale or 1) * barScale
@@ -658,25 +625,9 @@ initFrame:SetScript("OnEvent", function(self)
                     local startX = Snap(gridStartX + (gridW - rowW) / 2)
                     local xOff = Snap(startX + col * (scaledBtnW + scaledPad))
                     local yOff = startY - Snap(row * (scaledBtnH + scaledPad))
-                    -- Set animation targets
-                    entry.targetX = xOff
-                    entry.targetY = yOff
-                    entry.targetW = scaledBtnW
-                    entry.targetH = scaledBtnH
-
-                    if not entry.currentX then
-                        -- First run or bar switch: snap immediately
-                        entry.currentX = xOff
-                        entry.currentY = yOff
-                        entry.currentW = scaledBtnW
-                        entry.currentH = scaledBtnH
-                        bf:SetSize(scaledBtnW, scaledBtnH)
-                        bf:ClearAllPoints()
-                        bf:SetPoint("TOPLEFT", self, "TOPLEFT", xOff, yOff)
-                    else
-                        -- Animate to new targets
-                        self:SetScript("OnUpdate", animOnUpdate)
-                    end
+                    bf:SetSize(scaledBtnW, scaledBtnH)
+                    bf:ClearAllPoints()
+                    bf:SetPoint("TOPLEFT", self, "TOPLEFT", xOff, yOff)
                     bf:Show()
 
                     -- Icon texture from real button
@@ -716,7 +667,7 @@ initFrame:SetScript("OnEvent", function(self)
                             local _, ct2 = UnitClass("player")
                             if ct2 then local cc2 = RAID_CLASS_COLORS[ct2]; if cc2 then cr, cg, cb = cc2.r, cc2.g, cc2.b end end
                         end
-                        local sz = Snap(brdSize)
+                        local sz = SnapS(brdSize, barScale)
 
                         bT:SetColorTexture(cr, cg, cb, ca)
                         UnsnapTex(bT)
@@ -847,6 +798,7 @@ initFrame:SetScript("OnEvent", function(self)
                         keybindFS:SetText(hkText)
                     end
                     keybindFS:SetFont(fontPath, scaledKBSize, "OUTLINE")
+                    keybindFS:SetShadowOffset(0, 0)
                     keybindFS:SetTextColor(kbColor.r, kbColor.g, kbColor.b)
                     -- Apply keybind X/Y offsets
                     local kbOX = (settings.keybindOffsetX or 0) * totalScale
@@ -866,6 +818,7 @@ initFrame:SetScript("OnEvent", function(self)
                         countFS:SetText(ctText)
                     end
                     countFS:SetFont(fontPath, scaledCTSize, "OUTLINE")
+                    countFS:SetShadowOffset(0, 0)
                     countFS:SetTextColor(ctColor.r, ctColor.g, ctColor.b)
                     -- Apply charges X/Y offsets
                     local ctOX = (settings.countOffsetX or 0) * totalScale
@@ -876,7 +829,6 @@ initFrame:SetScript("OnEvent", function(self)
                 else
                     -- Button beyond numButtonsShowable ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â hide it
                     bf:Hide()
-                    entry.currentX = nil  -- reset animation state
                 end
             end
 
@@ -998,7 +950,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- "Click to Sync" text at full opacity
         local txt = overlay:CreateFontString(nil, "OVERLAY")
-        txt:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+        txt:SetFont(EllesmereUI.EXPRESSWAY, 11, GetEABOptOutline())
         txt:SetTextColor(
             EllesmereUI.ELLESMERE_GREEN.r,
             EllesmereUI.ELLESMERE_GREEN.g,
@@ -1082,7 +1034,7 @@ initFrame:SetScript("OnEvent", function(self)
                 bg:SetColorTexture(0.08, 0.08, 0.10, 0.92)
 
                 local txt = ov:CreateFontString(nil, "OVERLAY")
-                txt:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+                txt:SetFont(EllesmereUI.EXPRESSWAY, 11, GetEABOptOutline())
                 txt:SetTextColor(
                     EllesmereUI.ELLESMERE_GREEN.r,
                     EllesmereUI.ELLESMERE_GREEN.g,
@@ -1358,15 +1310,10 @@ initFrame:SetScript("OnEvent", function(self)
                   end
                   EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="label", text="" },
             { type="dropdown", text="Orientation",
               values=orientValues, order=orientOrder,
               disabled=_blizzDis, disabledTooltip=BLIZZ_DIS_TIP,
               getValue=function()
-                  -- Both bars share orientation; read from XPBar
                   return EAB.db.profile.bars["XPBar"] and EAB.db.profile.bars["XPBar"].orientation or "HORIZONTAL"
               end,
               setValue=function(v)
@@ -1569,6 +1516,127 @@ initFrame:SetScript("OnEvent", function(self)
         if not visOnly then
             _, h = W:SectionHeader(parent, SECTION_LAYOUT, y);  y = y - h
 
+            -- Row 1: Bar Visibility (dropdown + housing cog) | Always Show Buttons
+            do
+                local _visBlizzDis
+                local _VIS_BLIZZ_TIP = "This option does not work with Blizzard Bars. Please use Blizzard Edit Mode."
+                if not isMulti and IsDataBar() then
+                    _visBlizzDis = function() return EAB.db.profile.useBlizzardDataBars end
+                end
+
+                local function GetVisKey(s)
+                    if s.alwaysHidden then return "always_hidden" end
+                    if s.mouseoverEnabled then return "mouseover" end
+                    if s.combatHideEnabled then return "hide_combat" end
+                    if s.combatShowEnabled then return "hide_ooc" end
+                    return "always"
+                end
+
+                local function ApplyVisKey(s, v)
+                    s.alwaysHidden     = (v == "always_hidden")
+                    s.mouseoverEnabled = (v == "mouseover")
+                    s.mouseoverAlpha   = (v == "mouseover") and 0 or 1
+                    s.combatHideEnabled = (v == "hide_combat")
+                    s.combatShowEnabled = (v == "hide_ooc")
+                    if v == "hide_combat" then s.combatShowEnabled = false end
+                    if v == "hide_ooc"    then s.combatHideEnabled = false end
+                end
+
+                local visValues = {
+                    always       = "Always",
+                    mouseover    = "Mouseover Fade",
+                    hide_combat  = "Hide In Combat",
+                    hide_ooc     = "Hide Out of Combat",
+                    always_hidden = "Always Hidden",
+                }
+                local visOrder = { "always", "mouseover", "hide_combat", "hide_ooc", "---", "always_hidden" }
+
+                local visRow1
+                visRow1, h = W:DualRow(parent, y,
+                    { type="dropdown", text="Bar Visibility",
+                      values=visValues, order=visOrder,
+                      disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil,
+                      getValue=function()
+                          if isMulti then
+                              local first = nil
+                              for _, key in ipairs(GROUP_BAR_ORDER) do
+                                  if groupChecked[key] then
+                                      local vk = GetVisKey(EAB.db.profile.bars[key])
+                                      if first == nil then first = vk
+                                      elseif first ~= vk then return GetVisKey(SDB()) end
+                                  end
+                              end
+                              return first or "always"
+                          end
+                          return GetVisKey(SB())
+                      end,
+                      setValue=function(v)
+                          if isMulti then
+                              for _, key in ipairs(GROUP_BAR_ORDER) do
+                                  if groupChecked[key] then
+                                      ApplyVisKey(EAB.db.profile.bars[key], v)
+                                  end
+                              end
+                          else
+                              ApplyVisKey(SB(), v)
+                          end
+                          EAB:ApplyAlwaysHidden()
+                          EAB:RefreshMouseover()
+                          EAB:ApplyCombatVisibility()
+                          EllesmereUI:RefreshPage()
+                      end },
+                    { type="toggle", text="Always Show Buttons",
+                      getValue=function()
+                          local v = SGet("alwaysShowButtons")
+                          if v == MIXED then
+                              local ev = SDB().alwaysShowButtons
+                              if ev == nil then return true end
+                              return ev
+                          end
+                          if v == nil then return true end
+                          return v
+                      end,
+                      setValue=function(v)
+                          SSet("alwaysShowButtons", v, function(k)
+                              EAB:ApplyAlwaysShowButtons(k)
+                              EAB:ApplyPaddingForBar(k)
+                              EAB:ApplyBackgroundForBar(k)
+                          end)
+                          SUpdatePreview()
+                      end,
+                      tooltip="Show button backgrounds even if a spell is not assigned to that slot." });  y = y - h
+                SWrap(visRow1._rightRegion, "alwaysShowButtons", function(k)
+                    EAB:ApplyAlwaysShowButtons(k)
+                    EAB:ApplyPaddingForBar(k)
+                    EAB:ApplyBackgroundForBar(k)
+                end)
+
+                -- Housing cog on the visibility dropdown
+                do
+                    local leftRgn = visRow1._leftRegion
+                    local _, housingCogShowRaw = EllesmereUI.BuildCogPopup({
+                        title = "Visibility Options",
+                        rows = {
+                            { type="toggle", label="Hide In Housing",
+                              get=function()
+                                  local v = SGet("housingHideEnabled")
+                                  if v == MIXED then return SDB().housingHideEnabled end
+                                  return v
+                              end,
+                              set=function(v)
+                                  SSet("housingHideEnabled", v, function(k)
+                                      EAB._forceHousing = true
+                                      EAB:UpdateHousingVisibility()
+                                  end)
+                              end },
+                        },
+                    })
+                    local housingCogShow = SWrapCog(housingCogShowRaw, { "housingHideEnabled" },
+                        { function(k) EAB._forceHousing = true; EAB:UpdateHousingVisibility() end })
+                    MakeCogBtn(leftRgn, housingCogShow)
+                end
+            end
+
             row, h = W:DualRow(parent, y,
                 { type="slider", text="Bar Scale", min=75, max=125, step=1,
                   getValue=function()
@@ -1602,6 +1670,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             row, h = W:DualRow(parent, y,
                 { type="slider", text="Number of Icons", min=1, max=12, step=1,
+                  isDisabled=function()
+                      if isMulti then return false end
+                      local info = BAR_LOOKUP[SelectedKey()]
+                      return info and info.isStance
+                  end,
                   getValue=function()
                       local v = SGet("overrideNumIcons")
                       if v == MIXED then
@@ -1774,7 +1847,7 @@ initFrame:SetScript("OnEvent", function(self)
                         bg:SetAllPoints()
                         bg:SetColorTexture(0.08, 0.08, 0.10, 0.92)
                         local txt = overlay:CreateFontString(nil, "OVERLAY")
-                        txt:SetFont(EllesmereUI.EXPRESSWAY, 11, "")
+                        txt:SetFont(EllesmereUI.EXPRESSWAY, 11, GetEABOptOutline())
                         txt:SetTextColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b, 1.0)
                         txt:SetPoint("CENTER")
                         txt:SetText("Click to Sync Different Values")
@@ -1796,117 +1869,6 @@ initFrame:SetScript("OnEvent", function(self)
                             EllesmereUI:RefreshPage(true)
                         end)
                     end
-                end
-            end
-
-            -- Row 4: Bar Visibility (dropdown + housing cog) | Click Through
-            do
-                local _visBlizzDis
-                local _VIS_BLIZZ_TIP = "This option does not work with Blizzard Bars. Please use Blizzard Edit Mode."
-                if not isMulti and IsDataBar() then
-                    _visBlizzDis = function() return EAB.db.profile.useBlizzardDataBars end
-                end
-
-                -- Helper: derive a single visibility key from the bar settings
-                local function GetVisKey(s)
-                    if s.alwaysHidden then return "always_hidden" end
-                    if s.mouseoverEnabled then return "mouseover" end
-                    if s.combatHideEnabled then return "hide_combat" end
-                    if s.combatShowEnabled then return "hide_ooc" end
-                    return "always"
-                end
-
-                -- Helper: apply a visibility key to a bar settings table
-                local function ApplyVisKey(s, v)
-                    s.alwaysHidden     = (v == "always_hidden")
-                    s.mouseoverEnabled = (v == "mouseover")
-                    s.mouseoverAlpha   = (v == "mouseover") and 0 or 1
-                    s.combatHideEnabled = (v == "hide_combat")
-                    s.combatShowEnabled = (v == "hide_ooc")
-                    if v == "hide_combat" then s.combatShowEnabled = false end
-                    if v == "hide_ooc"    then s.combatHideEnabled = false end
-                end
-
-                local visValues = {
-                    always       = "Always",
-                    mouseover    = "Mouseover Fade",
-                    hide_combat  = "Hide In Combat",
-                    hide_ooc     = "Hide Out of Combat",
-                    always_hidden = "Always Hidden",
-                }
-                local visOrder = { "always", "mouseover", "hide_combat", "hide_ooc", "---", "always_hidden" }
-
-                local visRow4
-                visRow4, h = W:DualRow(parent, y,
-                    { type="dropdown", text="Bar Visibility",
-                      values=visValues, order=visOrder,
-                      disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil,
-                      getValue=function()
-                          if isMulti then
-                              local first = nil
-                              for _, key in ipairs(GROUP_BAR_ORDER) do
-                                  if groupChecked[key] then
-                                      local vk = GetVisKey(EAB.db.profile.bars[key])
-                                      if first == nil then first = vk
-                                      elseif first ~= vk then return GetVisKey(SDB()) end
-                                  end
-                              end
-                              return first or "always"
-                          end
-                          return GetVisKey(SB())
-                      end,
-                      setValue=function(v)
-                          if isMulti then
-                              for _, key in ipairs(GROUP_BAR_ORDER) do
-                                  if groupChecked[key] then
-                                      ApplyVisKey(EAB.db.profile.bars[key], v)
-                                  end
-                              end
-                          else
-                              ApplyVisKey(SB(), v)
-                          end
-                          EAB:ApplyAlwaysHidden()
-                          EAB:RefreshMouseover()
-                          EAB:ApplyCombatVisibility()
-                          EllesmereUI:RefreshPage()
-                      end },
-                    { type="toggle", text="Click Through",
-                      disabled=_visBlizzDis, disabledTooltip=_visBlizzDis and _VIS_BLIZZ_TIP or nil,
-                      getValue=function()
-                          local v = SGet("clickThrough")
-                          if v == MIXED then return SDB().clickThrough end
-                          return v
-                      end,
-                      setValue=function(v)
-                          SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
-                      end });  y = y - h
-                if not visOnly then
-                    SWrap(visRow4._rightRegion, "clickThrough", function(k) EAB:ApplyClickThroughForBar(k) end)
-                end
-
-                -- Housing cog on the visibility dropdown
-                do
-                    local leftRgn = visRow4._leftRegion
-                    local _, housingCogShowRaw = EllesmereUI.BuildCogPopup({
-                        title = "Visibility Options",
-                        rows = {
-                            { type="toggle", label="Hide In Housing",
-                              get=function()
-                                  local v = SGet("housingHideEnabled")
-                                  if v == MIXED then return SDB().housingHideEnabled end
-                                  return v
-                              end,
-                              set=function(v)
-                                  SSet("housingHideEnabled", v, function(k)
-                                      EAB._forceHousing = true
-                                      EAB:UpdateHousingVisibility()
-                                  end)
-                              end },
-                        },
-                    })
-                    local housingCogShow = SWrapCog(housingCogShowRaw, { "housingHideEnabled" },
-                        { function(k) EAB._forceHousing = true; EAB:UpdateHousingVisibility() end })
-                    MakeCogBtn(leftRgn, housingCogShow)
                 end
             end
 
@@ -2136,7 +2098,7 @@ initFrame:SetScript("OnEvent", function(self)
                 EAB:ApplyShapesForBar(k)
             end)
 
-            -- Row 3: Bar Background (toggle + inline swatch + cog) | Always Show Buttons
+            -- Row 3: Bar Background (toggle + inline swatch + cog) | Click Through
             local bgAlwaysRow
             bgAlwaysRow, h = W:DualRow(parent, y,
                 { type="toggle", text="Bar Background",
@@ -2150,32 +2112,17 @@ initFrame:SetScript("OnEvent", function(self)
                       SUpdatePreview()
                       EllesmereUI:RefreshPage()
                   end },
-                { type="toggle", text="Always Show Buttons",
+                { type="toggle", text="Click Through",
                   getValue=function()
-                      local v = SGet("alwaysShowButtons")
-                      if v == MIXED then
-                          local ev = SDB().alwaysShowButtons
-                          if ev == nil then return true end
-                          return ev
-                      end
-                      if v == nil then return true end
+                      local v = SGet("clickThrough")
+                      if v == MIXED then return SDB().clickThrough end
                       return v
                   end,
                   setValue=function(v)
-                      SSet("alwaysShowButtons", v, function(k)
-                          EAB:ApplyAlwaysShowButtons(k)
-                          EAB:ApplyPaddingForBar(k)
-                          EAB:ApplyBackgroundForBar(k)
-                      end)
-                      SUpdatePreview()
-                  end,
-                  tooltip="Show button backgrounds even if a spell is not assigned to that slot." });  y = y - h
+                      SSet("clickThrough", v, function(k) EAB:ApplyClickThroughForBar(k) end)
+                  end });  y = y - h
             SWrap(bgAlwaysRow._leftRegion, "bgEnabled", function(k) EAB:ApplyBackgroundForBar(k) end)
-            SWrap(bgAlwaysRow._rightRegion, "alwaysShowButtons", function(k)
-                EAB:ApplyAlwaysShowButtons(k)
-                EAB:ApplyPaddingForBar(k)
-                EAB:ApplyBackgroundForBar(k)
-            end)
+            SWrap(bgAlwaysRow._rightRegion, "clickThrough", function(k) EAB:ApplyClickThroughForBar(k) end)
 
             -- Inline elements on Bar Background (left): color swatch + cog (Width/Height)
             do
@@ -2625,7 +2572,7 @@ initFrame:SetScript("OnEvent", function(self)
             )
 
             local ddLabel = ddRowFrame:CreateFontString(nil, "OVERLAY")
-            ddLabel:SetFont(EllesmereUI.EXPRESSWAY, 12, "")
+            ddLabel:SetFont(EllesmereUI.EXPRESSWAY, 12, GetEABOptOutline())
             ddLabel:SetTextColor(EllesmereUI.TEXT_WHITE_R or 0.9, EllesmereUI.TEXT_WHITE_G or 0.9, EllesmereUI.TEXT_WHITE_B or 0.9, 0.7)
             ddLabel:SetText("Preview Bar:")
             local lblW = ddLabel:GetStringWidth()

@@ -20,30 +20,19 @@ local ADDON_NAME = ...
 local PAGE_GENERAL      = "General"
 local PAGE_CORE        = "Quick Setup"
 local PAGE_COLORS      = "Fonts & Colors"
-local PAGE_ADDONS      = "Enabled Addons"
 local PAGE_PROFILES    = "Profiles"
 
 -------------------------------------------------------------------------------
---  FCT font — set the global as early as possible (file scope).
---  The WoW engine caches the damage font at login, so changes only take
---  effect after a full logout to character select (not just /reload).
+--  FCT font — handled by EllesmereUI_Startup.lua which runs earlier.
 -------------------------------------------------------------------------------
-do
-    -- Migrate FCT font path from old media root to fonts subfolder
-    if EllesmereUIDB and EllesmereUIDB.fctFont and type(EllesmereUIDB.fctFont) == "string" then
-        EllesmereUIDB.fctFont = EllesmereUIDB.fctFont:gsub("\\media\\Expressway", "\\media\\fonts\\Expressway")
-    end
-    local saved = EllesmereUIDB and EllesmereUIDB.fctFont
-    if saved and type(saved) == "string" and saved ~= "" then
-        _G.DAMAGE_TEXT_FONT = saved
-    end
-end
 
 -- Wait for EllesmereUI to exist
 local initFrame = CreateFrame("Frame")
 initFrame:RegisterEvent("PLAYER_LOGIN")
 initFrame:SetScript("OnEvent", function(self)
     self:UnregisterEvent("PLAYER_LOGIN")
+
+    -- Re-apply combat text font at login — handled by EllesmereUI_Startup.lua.
 
     if not EllesmereUI or not EllesmereUI.RegisterModule then return end
     local PP = EllesmereUI.PanelPP
@@ -170,7 +159,7 @@ initFrame:SetScript("OnEvent", function(self)
             local editBox = CreateFrame("EditBox", nil, sc)
             editBox:SetMultiLine(true)
             editBox:SetAutoFocus(false)
-            editBox:SetFont(FONT, 12, "")
+            editBox:SetFont(FONT, 12, EllesmereUI.GetFontOutlineFlag())
             editBox:SetTextColor(1, 1, 1, 0.75)
             editBox:SetAllPoints(sc)
             editBox:SetScript("OnEscapePressed", function(self)
@@ -620,7 +609,7 @@ initFrame:SetScript("OnEvent", function(self)
             infoBtn:SetFrameLevel(gfxFrame:GetFrameLevel() + 1)
             local EG = EllesmereUI.ELLESMERE_GREEN
             local infoFS = infoBtn:CreateFontString(nil, "OVERLAY")
-            infoFS:SetFont(EllesmereUI.EXPRESSWAY, 12, "")
+            infoFS:SetFont(EllesmereUI.EXPRESSWAY, 12, EllesmereUI.GetFontOutlineFlag())
             infoFS:SetTextColor(EG.r, EG.g, EG.b, 0.70)
             infoFS:SetText("More Information")
             infoFS:SetPoint("CENTER")
@@ -679,21 +668,23 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUI:RefreshPage()
               end },
             { type="dropdown", text="Window Scale",
-              values={ ["Small (90%)"]="Small (90%)", ["Normal (100%)"]="Normal (100%)", ["Large (110%)"]="Large (110%)", ["Huge (120%)"]="Huge (120%)" },
-              order={ "Small (90%)", "Normal (100%)", "Large (110%)", "Huge (120%)" },
+              values={ ["Small (90%)"]="Small (90%)", ["Normal (100%)"]="Normal (100%)", ["Large (110%)"]="Large (110%)", ["Huge (125%)"]="Huge (125%)", ["Massive (150%)"]="Massive (150%)" },
+              order={ "Small (90%)", "Normal (100%)", "Large (110%)", "Huge (125%)", "Massive (150%)" },
               getValue=function()
                 local raw = (EllesmereUIDB and EllesmereUIDB.panelScale) or 1.0
                 local pct = floor(raw * 100 + 0.5)
-                if pct == 90  then return "Small (90%)"  end
-                if pct == 110 then return "Large (110%)" end
-                if pct == 120 then return "Huge (120%)"  end
+                if pct == 90  then return "Small (90%)"   end
+                if pct == 110 then return "Large (110%)"  end
+                if pct == 125 then return "Huge (125%)"   end
+                if pct == 150 then return "Massive (150%)" end
                 return "Normal (100%)"
               end,
               setValue=function(v)
                 local scale = 1.0
-                if v == "Small (90%)"  then scale = 0.90
-                elseif v == "Large (110%)" then scale = 1.10
-                elseif v == "Huge (120%)"  then scale = 1.20 end
+                if v == "Small (90%)"    then scale = 0.90
+                elseif v == "Large (110%)"  then scale = 1.10
+                elseif v == "Huge (125%)"   then scale = 1.25
+                elseif v == "Massive (150%)" then scale = 1.50 end
                 if EllesmereUI.SetPanelScale then
                     EllesmereUI:SetPanelScale(scale)
                 end
@@ -732,7 +723,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:DualRow(parent, y,
             { type="slider", text="UI Scale",
-              min=40, max=100, step=1,
+              min=40, max=115, step=1,
+              tooltip="Sets the scale of the entire game UI. Defaults to your current WoW UI scale setting.",
               getValue=function()
                 if EllesmereUI._blizzUIScaleDragVal then
                     return EllesmereUI._blizzUIScaleDragVal
@@ -754,7 +746,19 @@ initFrame:SetScript("OnEvent", function(self)
                     end)
                 end
               end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Show Minimap Button",
+              getValue=function()
+                return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
+              end,
+              setValue=function(v)
+                if not EllesmereUIDB then EllesmereUIDB = {} end
+                EllesmereUIDB.showMinimapButton = v
+                if v then
+                    EllesmereUI.ShowMinimapButton()
+                else
+                    EllesmereUI.HideMinimapButton()
+                end
+              end });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -1640,136 +1644,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.showSpellID = v
               end });  y = y - h
 
-        _, h = W:DualRow(parent, y,
-            { type="toggle", text="Show Minimap Button",
-              getValue=function()
-                return not (EllesmereUIDB and EllesmereUIDB.showMinimapButton == false)
-              end,
-              setValue=function(v)
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                EllesmereUIDB.showMinimapButton = v
-                local ok, LDBIcon = pcall(LibStub, "LibDBIcon-1.0")
-                if ok and LDBIcon and LDBIcon:IsRegistered("EllesmereUI") then
-                    local btn = LDBIcon:GetMinimapButton("EllesmereUI")
-                    if v then
-                        if btn and btn.db then btn.db.hide = false end
-                        LDBIcon:Show("EllesmereUI")
-                    else
-                        if btn and btn.db then btn.db.hide = true end
-                        LDBIcon:Hide("EllesmereUI")
-                    end
-                end
-              end },
-            { type="label", text="" });  y = y - h
-
-        _, h = W:Spacer(parent, y, 20);  y = y - h
-
-        -------------------------------------------------------------------
-        --  ENABLED ADDONS
-        -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "ENABLED ADDONS", y);  y = y - h
-
-        do
-            local roster = EllesmereUI.ADDON_ROSTER
-            if roster then
-                local function IsAddonInstalled(folder)
-                    if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(folder) end
-                    if IsAddOnLoaded then return IsAddOnLoaded(folder) end
-                    return false
-                end
-
-                local function GetDisabledDB()
-                    if not EllesmereUIDB then EllesmereUIDB = {} end
-                    if not EllesmereUIDB.disabledAddons then EllesmereUIDB.disabledAddons = {} end
-                    return EllesmereUIDB.disabledAddons
-                end
-
-                local function ShowReloadPopup()
-                    EllesmereUI:ShowConfirmPopup({
-                        title       = "Reload Required",
-                        message     = "Toggling an addon requires a UI reload to take effect.",
-                        confirmText = "Reload Now",
-                        cancelText  = "Later",
-                        onConfirm   = function() ReloadUI() end,
-                    })
-                end
-
-                parent._showRowDivider = true
-
-                local installed = {}
-                for _, info in ipairs(roster) do
-                    if not info.alwaysLoaded and IsAddonInstalled(info.folder) then
-                        installed[#installed + 1] = info
-                    end
-                end
-
-                local function CountEnabled()
-                    local db = GetDisabledDB()
-                    local n = 0
-                    for _, info in ipairs(installed) do
-                        if db[info.folder] ~= true then n = n + 1 end
-                    end
-                    return n
-                end
-
-                local function IsLastEnabled(folder)
-                    local db = GetDisabledDB()
-                    if db[folder] == true then return false end
-                    return CountEnabled() <= 1
-                end
-
-                local LAST_ADDON_TIP = "You must have at least one addon enabled"
-
-                for i = 1, #installed, 2 do
-                    local left = installed[i]
-                    local right = installed[i + 1]
-
-                    local leftCfg = {
-                        type = "toggle",
-                        text = left.display,
-                        disabled = function() return IsLastEnabled(left.folder) end,
-                        disabledTooltip = LAST_ADDON_TIP,
-                        getValue = function()
-                            local db = GetDisabledDB()
-                            return db[left.folder] ~= true
-                        end,
-                        setValue = function(v)
-                            local db = GetDisabledDB()
-                            db[left.folder] = (not v) or nil
-                            local rl = EllesmereUI._widgetRefreshList
-                            if rl then for ri = 1, #rl do rl[ri]() end end
-                            ShowReloadPopup()
-                        end,
-                    }
-
-                    local rightCfg
-                    if right then
-                        rightCfg = {
-                            type = "toggle",
-                            text = right.display,
-                            disabled = function() return IsLastEnabled(right.folder) end,
-                            disabledTooltip = LAST_ADDON_TIP,
-                            getValue = function()
-                                local db = GetDisabledDB()
-                                return db[right.folder] ~= true
-                            end,
-                            setValue = function(v)
-                                local db = GetDisabledDB()
-                                db[right.folder] = (not v) or nil
-                                local rl = EllesmereUI._widgetRefreshList
-                                if rl then for ri = 1, #rl do rl[ri]() end end
-                                ShowReloadPopup()
-                            end,
-                        }
-                    else
-                        rightCfg = { type = "label", text = "" }
-                    end
-
-                    _, h = W:DualRow(parent, y, leftCfg, rightCfg);  y = y - h
-                end
-            end
-        end
-
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
         -- Reset ALL EUI Addon Settings (wide warning button)
@@ -1842,9 +1716,8 @@ initFrame:SetScript("OnEvent", function(self)
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "ACTION BARS", y);  y = y - h
 
-        -- Access EAB through AceAddon registry
-        local EAB = LibStub and LibStub("AceAddon-3.0", true)
-            and LibStub("AceAddon-3.0"):GetAddon("EllesmereUIActionBars", true)
+        -- Access EAB through addon registry
+        local EAB = EllesmereUI.Lite and EllesmereUI.Lite.GetAddon("EllesmereUIActionBars", true)
         local function EAB_db()
             if EAB and EAB.db then return EAB.db.profile end
             return nil
@@ -2035,8 +1908,7 @@ initFrame:SetScript("OnEvent", function(self)
         local SWATCH_SZ     = 20
 
         -- items = { { label, classToken, getColor, setColor, resetFn }, ... }
-        local function BuildColorGrid(par, yPos, items)
-            local totalRows = math.ceil(#items / GRID_COLS)
+        local function BuildColorGrid(par, yPos, items)            local totalRows = math.ceil(#items / GRID_COLS)
             local totalW = par:GetWidth() - GRID_PAD * 2
             local colW = math.floor(totalW / GRID_COLS)
 
@@ -2123,6 +1995,94 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -------------------------------------------------------------------
+        --  FONTS section
+        -------------------------------------------------------------------
+        _, h = W:SectionHeader(parent, "FONTS", y);  y = y - h
+
+        -- For locales that require system fonts (CJK, Cyrillic), the font
+        -- selection dropdowns are not applicable — the system font is used
+        -- automatically regardless of what is selected here.
+        if EllesmereUI.LOCALE_FONT_FALLBACK then
+            local noticeFrame = CreateFrame("Frame", nil, parent)
+            local totalW = parent:GetWidth() - EllesmereUI.CONTENT_PAD * 2
+            PP.Size(noticeFrame, totalW, 70)
+            PP.Point(noticeFrame, "TOPLEFT", parent, "TOPLEFT", EllesmereUI.CONTENT_PAD, y)
+            EllesmereUI.RowBg(noticeFrame, parent)
+
+            local icon = noticeFrame:CreateTexture(nil, "ARTWORK")
+            icon:SetTexture("Interface\\DialogFrame\\UI-Dialog-Icon-AlertOther")
+            PP.Size(icon, 24, 24)
+            PP.Point(icon, "LEFT", noticeFrame, "LEFT", 16, 0)
+            icon:SetVertexColor(EllesmereUI.ELLESMERE_GREEN.r, EllesmereUI.ELLESMERE_GREEN.g, EllesmereUI.ELLESMERE_GREEN.b)
+
+            local msg = noticeFrame:CreateFontString(nil, "OVERLAY")
+            msg:SetFont(EllesmereUI.EXPRESSWAY, 13, EllesmereUI.GetFontOutlineFlag())
+            msg:SetTextColor(1, 1, 1, 0.75)
+            msg:SetJustifyH("LEFT")
+            msg:SetPoint("LEFT", icon, "RIGHT", 12, 4)
+            msg:SetPoint("RIGHT", noticeFrame, "RIGHT", -16, 0)
+            msg:SetText("Your game client language uses a system font automatically.\nFont selection is not available for this locale.")
+
+            y = y - 70
+            return math.abs(y)
+        end
+
+        local fontDropValues = {}
+        local fontDropOrder  = {}
+        local FONT_DIR_GLOBAL = EllesmereUI.MEDIA_PATH .. "fonts\\"
+        for _, name in ipairs(EllesmereUI.FONT_ORDER) do
+            if name == "---" then
+                fontDropOrder[#fontDropOrder + 1] = "---"
+            else
+                local path = EllesmereUI.FONT_BLIZZARD[name]
+                    or (FONT_DIR_GLOBAL .. (EllesmereUI.FONT_FILES[name] or "Expressway.TTF"))
+                fontDropValues[name] = { text = name, font = path }
+                fontDropOrder[#fontDropOrder + 1] = name
+            end
+        end
+
+        -- Reload popup for font changes
+        local function FontReload()
+            EllesmereUI:ShowConfirmPopup({
+                title       = "Reload Required",
+                message     = "Font changed. A UI reload is needed to apply the new font.",
+                confirmText = "Reload Now",
+                cancelText  = "Later",
+                onConfirm   = function() ReloadUI() end,
+            })
+        end
+
+        local outlineModeValues = {
+            ["none"]    = { text = "Drop Shadow" },
+            ["outline"] = { text = "Outline" },
+            ["thick"]   = { text = "Thick Outline" },
+        }
+        local outlineModeOrder = { "none", "outline", "thick" }
+
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Global Font",
+              values=fontDropValues, order=fontDropOrder,
+              getValue=function() return EllesmereUI.GetFontsDB().global or "Expressway" end,
+              setValue=function(v)
+                  EllesmereUI.GetFontsDB().global = v
+                  local rl = EllesmereUI._widgetRefreshList
+                  if rl then for i2 = 1, #rl do rl[i2]() end end
+                  FontReload()
+              end },
+            { type="dropdown", text="Outline Mode",
+              tooltip="Controls the text rendering style used across all UI elements",
+              values=outlineModeValues, order=outlineModeOrder,
+              getValue=function() return EllesmereUI.GetFontsDB().outlineMode or "shadow" end,
+              setValue=function(v)
+                  EllesmereUI.GetFontsDB().outlineMode = v
+                  local rl = EllesmereUI._widgetRefreshList
+                  if rl then for i2 = 1, #rl do rl[i2]() end end
+                  FontReload()
+              end });  y = y - h
+
+        _, h = W:Spacer(parent, y, 20);  y = y - h
+
+        -------------------------------------------------------------------
         --  CLASS COLORS section
         -------------------------------------------------------------------
         _, h = W:SectionHeader(parent, "CLASS COLORS", y);  y = y - h
@@ -2186,180 +2146,6 @@ initFrame:SetScript("OnEvent", function(self)
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
-        -------------------------------------------------------------------
-        --  FONTS section
-        -------------------------------------------------------------------
-        _, h = W:SectionHeader(parent, "FONTS", y);  y = y - h
-
-        local fontDropValues = {}
-        local fontDropOrder  = {}
-        local FONT_DIR_GLOBAL = EllesmereUI.MEDIA_PATH .. "fonts\\"
-        for _, name in ipairs(EllesmereUI.FONT_ORDER) do
-            if name == "---" then
-                fontDropOrder[#fontDropOrder + 1] = "---"
-            else
-                local path = EllesmereUI.FONT_BLIZZARD[name]
-                    or (FONT_DIR_GLOBAL .. (EllesmereUI.FONT_FILES[name] or "Expressway.TTF"))
-                fontDropValues[name] = { text = name, font = path }
-                fontDropOrder[#fontDropOrder + 1] = name
-            end
-        end
-
-        local function IsGlobalOn()
-            return EllesmereUI.GetFontsDB().globalEnabled
-        end
-
-        -- Reload popup for font changes
-        local function FontReload()
-            EllesmereUI:ShowConfirmPopup({
-                title       = "Reload Required",
-                message     = "Font changed. A UI reload is needed to apply the new font.",
-                confirmText = "Reload Now",
-                cancelText  = "Later",
-                onConfirm   = function() ReloadUI() end,
-            })
-        end
-
-        local globalFontRow
-        globalFontRow, h = W:DualRow(parent, y,
-            { type="dropdown", text="Global Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return not IsGlobalOn() end,
-              disabledTooltip="Enable the Global Font toggle to use this setting",
-              getValue=function() return EllesmereUI.GetFontsDB().global or "Expressway" end,
-              setValue=function(v)
-                  EllesmereUI.GetFontsDB().global = v
-                  local rl = EllesmereUI._widgetRefreshList
-                  if rl then for i2 = 1, #rl do rl[i2]() end end
-                  FontReload()
-              end },
-            { type="dropdown", text="General Extras Font",
-              tooltip="Affects global settings extras like durability warning and show FPS counter",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().extras or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().extras = v; FontReload() end });  y = y - h
-
-        -- Inline toggle on the Global Font dropdown (left region)
-        do
-            local leftRgn = globalFontRow._leftRegion
-            local TOGGLE_W, TOGGLE_H = 40, 20
-            local KNOB_SZ, KNOB_PAD = 16, 3
-            local toggle = CreateFrame("Button", nil, leftRgn)
-            PP.Size(toggle, TOGGLE_W, TOGGLE_H)
-            toggle:SetPoint("RIGHT", leftRgn._control, "LEFT", -12, 0)
-            toggle:SetFrameLevel(leftRgn:GetFrameLevel() + 5)
-            leftRgn._lastInline = toggle
-
-            local tBg = toggle:CreateTexture(nil, "BACKGROUND")
-            if tBg.SetSnapToPixelGrid then tBg:SetSnapToPixelGrid(false); tBg:SetTexelSnappingBias(0) end
-            tBg:SetAllPoints()
-            local knob = toggle:CreateTexture(nil, "ARTWORK")
-            if knob.SetSnapToPixelGrid then knob:SetSnapToPixelGrid(false); knob:SetTexelSnappingBias(0) end
-            PP.Size(knob, KNOB_SZ, KNOB_SZ)
-
-            local POS_OFF = KNOB_PAD
-            local POS_ON  = TOGGLE_W - KNOB_SZ - KNOB_PAD
-            local GREEN = EllesmereUI.ELLESMERE_GREEN or { r = 0.2, g = 0.8, b = 0.4 }
-            local animProgress = IsGlobalOn() and 1 or 0
-            local animTarget   = animProgress
-
-            local function lerp2(a, b, t2) return a + (b - a) * t2 end
-            local function ApplyVisual(p)
-                knob:ClearAllPoints()
-                PP.Point(knob, "LEFT", toggle, "LEFT", lerp2(POS_OFF, POS_ON, p), 0)
-                tBg:SetColorTexture(
-                    lerp2(0.18, GREEN.r, p),
-                    lerp2(0.18, GREEN.g, p),
-                    lerp2(0.18, GREEN.b, p),
-                    lerp2(0.5, 0.9, p))
-                knob:SetColorTexture(
-                    lerp2(0.45, 1, p),
-                    lerp2(0.45, 1, p),
-                    lerp2(0.45, 1, p),
-                    lerp2(0.6, 1, p))
-            end
-            ApplyVisual(animProgress)
-
-            local ANIM_DUR = 0.075
-            local function AnimOnUpdate(self, elapsed)
-                local dir = (animTarget == 1) and 1 or -1
-                animProgress = animProgress + dir * (elapsed / ANIM_DUR)
-                if (dir == 1 and animProgress >= 1) or (dir == -1 and animProgress <= 0) then
-                    animProgress = animTarget
-                    self:SetScript("OnUpdate", nil)
-                end
-                ApplyVisual(animProgress)
-            end
-
-            toggle:SetScript("OnClick", function()
-                local v = not IsGlobalOn()
-                EllesmereUI.GetFontsDB().globalEnabled = v
-                animTarget = v and 1 or 0
-                toggle:SetScript("OnUpdate", AnimOnUpdate)
-                local rl = EllesmereUI._widgetRefreshList
-                if rl then for i2 = 1, #rl do rl[i2]() end end
-            end)
-
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local v = IsGlobalOn() and 1 or 0
-                animProgress = v; animTarget = v; ApplyVisual(v)
-                toggle:SetScript("OnUpdate", nil)
-            end)
-        end
-
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Action Bars Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().actionBars or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().actionBars = v; FontReload() end },
-            { type="dropdown", text="Nameplates Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().nameplates or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().nameplates = v; FontReload() end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Unit Frames Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().unitFrames or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().unitFrames = v; FontReload() end },
-            { type="dropdown", text="CDM Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().cdm or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().cdm = v; FontReload() end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Resource Bars Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().resourceBars or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().resourceBars = v; FontReload() end },
-            { type="dropdown", text="AuraBuff Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().auraBuff or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().auraBuff = v; FontReload() end });  y = y - h
-
-        _, h = W:DualRow(parent, y,
-            { type="dropdown", text="Raid Frames Font",
-              values=fontDropValues, order=fontDropOrder,
-              disabled=function() return IsGlobalOn() end,
-              disabledTooltip="Disable Global Font",
-              getValue=function() return EllesmereUI.GetFontsDB().raidFrames or "Expressway" end,
-              setValue=function(v) EllesmereUI.GetFontsDB().raidFrames = v; FontReload() end },
-            nil);  y = y - h
-
         return math.abs(y)
     end
 
@@ -2387,8 +2173,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         local function MakeFS(size)
             local f = fpsFrame:CreateFontString(nil, "OVERLAY")
-            f:SetFont(FONT, size, "")
-            f:SetShadowOffset(SHADOW_X, SHADOW_Y)
+            f:SetFont(FONT, size, EllesmereUI.GetFontOutlineFlag())
+            if EllesmereUI.GetFontUseShadow() then f:SetShadowOffset(SHADOW_X, SHADOW_Y) else f:SetShadowOffset(0, 0) end
             f:SetTextColor(1, 1, 1, 1)
             return f
         end
@@ -2717,7 +2503,7 @@ initFrame:SetScript("OnEvent", function(self)
         durWarnOverlay:EnableMouse(false)
 
         local fs = durWarnOverlay:CreateFontString(nil, "OVERLAY")
-        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, "OUTLINE")
+        fs:SetFont(EllesmereUI.EXPRESSWAY or "Fonts\\FRIZQT__.TTF", 18, EllesmereUI.GetFontOutlineFlag())
         fs:SetPoint("CENTER")
         fs:SetText("Low Durability")
         durWarnOverlay._text = fs
@@ -2737,7 +2523,7 @@ initFrame:SetScript("OnEvent", function(self)
 
             -- Font — pull from the global "extras" font key
             local fontPath = EllesmereUI.GetFontPath("extras")
-            fs:SetFont(fontPath, 18, "OUTLINE")
+            fs:SetFont(fontPath, 18, EllesmereUI.GetFontOutlineFlag())
 
             -- Color
             local c = EllesmereUIDB and EllesmereUIDB.durWarnColor
@@ -2849,11 +2635,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
             local pct = EllesmereUIDB and EllesmereUIDB.blizzUIScale or 100
             -- Scale proportionally from the Blizzard default.
-            -- 100% = baseUIScale (Blizzard default, e.g. ~0.64 on 1080p)
-            -- 50%  = baseUIScale * 0.5
-            -- This avoids the discontinuity where 99% jumped to a completely
-            -- different scale than 100%.  ElvUI uses raw scale values directly;
-            -- we convert our percentage into the equivalent raw scale.
+            -- 100% = baseUIScale (no change), 50% = half, 115% = 15% larger.
             local newScale = baseUIScale * (pct / 100)
             -- Snapshot our panel's current effective scale before changing UIParent
             local mf = EllesmereUI._mainFrame
@@ -2941,112 +2723,6 @@ initFrame:SetScript("OnEvent", function(self)
     ---------------------------------------------------------------------------
     --  Enabled Addons page
     ---------------------------------------------------------------------------
-    local function BuildEnabledAddonsPage(pageName, parent, yOffset)
-        local W = EllesmereUI.Widgets
-        local y = yOffset
-        local _, h
-        local roster = EllesmereUI.ADDON_ROSTER
-        if not roster then return end
-
-        local function IsAddonInstalled(folder)
-            if C_AddOns and C_AddOns.IsAddOnLoaded then return C_AddOns.IsAddOnLoaded(folder) end
-            if IsAddOnLoaded then return IsAddOnLoaded(folder) end
-            return false
-        end
-
-        local function GetDisabledDB()
-            if not EllesmereUIDB then EllesmereUIDB = {} end
-            if not EllesmereUIDB.disabledAddons then EllesmereUIDB.disabledAddons = {} end
-            return EllesmereUIDB.disabledAddons
-        end
-
-        local function ShowReloadPopup()
-            EllesmereUI:ShowConfirmPopup({
-                title       = "Reload Required",
-                message     = "Toggling an addon requires a UI reload to take effect.",
-                confirmText = "Reload Now",
-                cancelText  = "Later",
-                onConfirm   = function() ReloadUI() end,
-            })
-        end
-
-        parent._showRowDivider = true
-
-        -- Build pairs of addons for DualRow layout (skip alwaysLoaded like Party Mode)
-        local installed = {}
-        for _, info in ipairs(roster) do
-            if not info.alwaysLoaded and IsAddonInstalled(info.folder) then
-                installed[#installed + 1] = info
-            end
-        end
-
-        -- Count how many installed addons are currently enabled
-        local function CountEnabled()
-            local db = GetDisabledDB()
-            local n = 0
-            for _, info in ipairs(installed) do
-                if db[info.folder] ~= true then n = n + 1 end
-            end
-            return n
-        end
-
-        -- Check if a specific addon is the last one enabled (cannot be turned off)
-        local function IsLastEnabled(folder)
-            local db = GetDisabledDB()
-            if db[folder] == true then return false end  -- already disabled, not relevant
-            return CountEnabled() <= 1
-        end
-
-        local LAST_ADDON_TIP = "You must have at least one addon enabled"
-
-        for i = 1, #installed, 2 do
-            local left = installed[i]
-            local right = installed[i + 1]
-
-            local leftCfg = {
-                type = "toggle",
-                text = left.display,
-                disabled = function() return IsLastEnabled(left.folder) end,
-                disabledTooltip = LAST_ADDON_TIP,
-                getValue = function()
-                    local db = GetDisabledDB()
-                    return db[left.folder] ~= true
-                end,
-                setValue = function(v)
-                    local db = GetDisabledDB()
-                    db[left.folder] = (not v) or nil
-                    local rl = EllesmereUI._widgetRefreshList
-                    if rl then for ri = 1, #rl do rl[ri]() end end
-                    ShowReloadPopup()
-                end,
-            }
-
-            local rightCfg
-            if right then
-                rightCfg = {
-                    type = "toggle",
-                    text = right.display,
-                    disabled = function() return IsLastEnabled(right.folder) end,
-                    disabledTooltip = LAST_ADDON_TIP,
-                    getValue = function()
-                        local db = GetDisabledDB()
-                        return db[right.folder] ~= true
-                    end,
-                    setValue = function(v)
-                        local db = GetDisabledDB()
-                        db[right.folder] = (not v) or nil
-                        local rl = EllesmereUI._widgetRefreshList
-                        if rl then for ri = 1, #rl do rl[ri]() end end
-                        ShowReloadPopup()
-                    end,
-                }
-            else
-                rightCfg = { type = "label", text = "" }
-            end
-
-            _, h = W:DualRow(parent, y, leftCfg, rightCfg);  y = y - h
-        end
-    end
 
     local disabledList = { PAGE_CORE, PAGE_PROFILES }
     local disabledTips = { [PAGE_CORE] = "Coming Soon", [PAGE_PROFILES] = "Coming Soon" }
@@ -3084,7 +2760,6 @@ initFrame:SetScript("OnEvent", function(self)
                 EllesmereUIDB.showSecondaryStats = false
                 EllesmereUIDB.guildChatPrivacy = false
                 EllesmereUIDB.repairWarning = nil
-                EllesmereUIDB.disabledAddons = nil
                 -- Developer settings defaults
                 EllesmereUIDB.errorGrabber = false
                 EllesmereUIDB.errorSound = false

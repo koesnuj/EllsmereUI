@@ -3698,7 +3698,7 @@ local function CreateHUD(parent)
         local HOVER_R, HOVER_G, HOVER_B = 1, 1, 1
         local NORMAL_A = 0.50
         local HOVER_A  = 0.90
-        local FONT_SZ  = 22
+        local FONT_SZ  = 26
 
         -- Load saved banner scale
         local bannerUserScale = 1.0
@@ -3781,18 +3781,11 @@ local function CreateHUD(parent)
             btn._isDisabled = false
 
             btn:SetScript("OnEnter", function(self)
-                if self._isDisabled then
-                    local tip = (text == "-") and "Minimum scale reached" or "Maximum scale reached"
-                    if EllesmereUI.ShowWidgetTooltip then
-                        EllesmereUI.ShowWidgetTooltip(self, tip)
-                    end
-                    return
-                end
+                if self._isDisabled then return end
                 self._shadow:SetTextColor(0, 0, 0, HOVER_A)
                 self._label:SetTextColor(HOVER_R, HOVER_G, HOVER_B, HOVER_A)
             end)
             btn:SetScript("OnLeave", function(self)
-                if EllesmereUI.HideWidgetTooltip then EllesmereUI.HideWidgetTooltip() end
                 if self._isDisabled then return end
                 self._shadow:SetTextColor(0, 0, 0, NORMAL_A)
                 self._label:SetTextColor(NORMAL_R, NORMAL_G, NORMAL_B, NORMAL_A)
@@ -3801,15 +3794,15 @@ local function CreateHUD(parent)
             return btn
         end
 
-        -- Minus button (left side of banner)
-        minusBtn = MakeScaleBtn("\226\128\147", "LEFT", hudFrame, "TOPLEFT", 30, iconCenterY)
+        -- Minus button (10px left of the Exit button, outer side)
+        minusBtn = MakeScaleBtn("\226\128\147", "RIGHT", exitBtn, "LEFT", -10, 0)
         minusBtn:SetScript("OnClick", function(self)
             if self._isDisabled then return end
             ApplyBannerScale(bannerUserScale - SCALE_STEP)
         end)
 
-        -- Plus button (right side of banner)
-        plusBtn = MakeScaleBtn("+", "RIGHT", hudFrame, "TOPRIGHT", -30, iconCenterY)
+        -- Plus button (10px right of the Save & Exit button, outer side)
+        plusBtn = MakeScaleBtn("+", "LEFT", hudFrame._saveBtn, "RIGHT", 10, 0)
         plusBtn:SetScript("OnClick", function(self)
             if self._isDisabled then return end
             ApplyBannerScale(bannerUserScale + SCALE_STEP)
@@ -3929,7 +3922,10 @@ local function SnapshotPositions()
                         if nPts and nPts > 0 then
                             local point, _, relPoint, x, y = fr:GetPoint(1)
                             if point then
-                                snapshotPositions[key] = { point = point, relPoint = relPoint, x = x, y = y }
+                                -- relPoint may be a frame object here (not a string) if the bar
+                                -- is anchored to a parent frame rather than UIParent. Mark this
+                                -- snapshot so RevertPositions skips writing it to SavedVariables.
+                                snapshotPositions[key] = { point = point, relPoint = relPoint, x = x, y = y, _fromLiveFrame = true }
                             end
                         end
                     end
@@ -4028,7 +4024,7 @@ local function RevertPositions()
         local elem = registeredElements[barKey]
         if elem and elem.savePosition then
             local snap = snapshotPositions[barKey]
-            if snap then
+            if snap and not snap._fromLiveFrame then
                 -- Pass snapshotted scale back to savePosition for non-EAB elements
                 local revertScale = snap.elemScale
                 elem.savePosition(barKey, snap.point, snap.relPoint or snap.point, snap.x, snap.y, revertScale)
@@ -4212,8 +4208,9 @@ function ns.RequestClose(save, afterFn)
             CommitPositions()
             DoClose()
         end,
-        -- Dismiss (ESC / click-off) does nothing — user stays in unlock mode
-        onDismiss = function() end,
+        -- Dismiss (ESC / click-off) does nothing — user stays in unlock mode,
+        -- and any pending close callback is cleared since the close was abandoned
+        onDismiss = function() pendingAfterClose = nil end,
     })
 end
 

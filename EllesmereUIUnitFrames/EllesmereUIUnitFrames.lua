@@ -1,4 +1,4 @@
-local addonName, ns = ...
+﻿local addonName, ns = ...
 
 local oUF = ns.oUF or oUF
 local PP = EllesmereUI.PP
@@ -507,9 +507,21 @@ local fontPaths = {
     ["Skurri"]              = "Fonts\\skurri.ttf",
 }
 
-local cachedFontPath = fontPaths["Expressway"]
+-- Locale system font override: for CJK/Cyrillic clients, bypass all custom
+-- fonts and use the WoW built-in font that supports the locale's glyphs.
+local LOCALE_FONT_OVERRIDE = EllesmereUI and EllesmereUI.LOCALE_FONT_FALLBACK
+
+local cachedFontPath = LOCALE_FONT_OVERRIDE or fontPaths["Expressway"]
 local cachedFontPaths = {}  -- per-unit font cache
 local function ResolveFontPath(unitKey)
+    -- Locale override takes absolute priority — no custom font can render CJK/Cyrillic
+    if LOCALE_FONT_OVERRIDE then
+        cachedFontPath = LOCALE_FONT_OVERRIDE
+        for _, uKey in ipairs({"player", "target", "focus", "boss", "pet", "totPet"}) do
+            cachedFontPaths[uKey] = LOCALE_FONT_OVERRIDE
+        end
+        return
+    end
     -- Global font system overrides per-unit fonts
     if EllesmereUI and EllesmereUI.GetFontPath then
         local gPath = EllesmereUI.GetFontPath("unitFrames")
@@ -547,9 +559,20 @@ local function GetSelectedFont(unitKey)
     return cachedFontPath
 end
 
+local function GetUFUseShadow()
+    return not EllesmereUI or not EllesmereUI.GetFontUseShadow or EllesmereUI.GetFontUseShadow()
+end
+
 local function SetFSFont(fs, size, flags)
   if not (fs and fs.SetFont) then return end
-  fs:SetFont(GetSelectedFont(), size or 12, flags or "SHADOW")
+  local f = flags or (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+  fs:SetFont(GetSelectedFont(), size or 12, f)
+  if f == "" then
+    fs:SetShadowOffset(1, -1)
+    fs:SetShadowColor(0, 0, 0, 1)
+  else
+    fs:SetShadowOffset(0, 0)
+  end
 end
 
 -- Disable WoW's automatic pixel snapping on a texture (prevents sub-pixel jitter)
@@ -1180,21 +1203,18 @@ local function CreateBottomTextBar(frame, unit, settings, anchorFrame, xOffset, 
     SetFSFont(leftFS, settings.btbLeftSize or 11)
     leftFS:SetWordWrap(false)
     leftFS:SetTextColor(1, 1, 1)
-    leftFS:SetShadowOffset(1, -1)
     btb.LeftText = leftFS
 
     local rightFS = textOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightFS, settings.btbRightSize or 11)
     rightFS:SetWordWrap(false)
     rightFS:SetTextColor(1, 1, 1)
-    rightFS:SetShadowOffset(1, -1)
     btb.RightText = rightFS
 
     local centerFS = textOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerFS, settings.btbCenterSize or 11)
     centerFS:SetWordWrap(false)
     centerFS:SetTextColor(1, 1, 1)
-    centerFS:SetShadowOffset(1, -1)
     btb.CenterText = centerFS
 
     btb._textOverlay = textOvr
@@ -1778,7 +1798,6 @@ local function CreatePowerBar(frame, unit, settings)
     ppTextOvr:SetFrameLevel(power:GetFrameLevel() + 2)
     local ppFS = ppTextOvr:CreateFontString(nil, "OVERLAY")
     SetFSFont(ppFS, settings.powerPercentSize or 9)
-    ppFS:SetShadowOffset(1, -1)
     ppFS:Hide()
     power._ppFS = ppFS
     power._ppTextOvr = ppTextOvr
@@ -2068,7 +2087,6 @@ local function CreateCastBar(frame, unit, settings)
     text:SetPoint("LEFT", castbar, "LEFT", 5, 1)
     text:SetJustifyH("LEFT")
     text:SetTextColor(1, 1, 1)
-    text:SetShadowOffset(1, -1)
     castbar.Text = text
 
     local time = castbar:CreateFontString(nil, "OVERLAY")
@@ -2076,7 +2094,6 @@ local function CreateCastBar(frame, unit, settings)
     time:SetPoint("RIGHT", castbar, "RIGHT", -5, 0)
     time:SetJustifyH("RIGHT")
     time:SetTextColor(1, 1, 1)
-    time:SetShadowOffset(1, -1)
     castbar.Time = time
 
     local shield = castbar:CreateTexture(nil, "OVERLAY")
@@ -2553,21 +2570,18 @@ local function StyleFullFrame(frame, unit)
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
-    leftText:SetShadowOffset(1, -1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
-    rightText:SetShadowOffset(1, -1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
-    centerText:SetShadowOffset(1, -1)
     frame.CenterText = centerText
 
     -- Backward compat aliases
@@ -2757,21 +2771,18 @@ local function StyleFocusFrame(frame, unit)
     SetFSFont(leftText, lts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
-    leftText:SetShadowOffset(1, -1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, rts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
-    rightText:SetShadowOffset(1, -1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, cts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
-    centerText:SetShadowOffset(1, -1)
     frame.CenterText = centerText
 
     -- Backward compat aliases
@@ -2928,21 +2939,18 @@ local function StyleSimpleFrame(frame, unit)
     SetFSFont(leftText, ts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
-    leftText:SetShadowOffset(1, -1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, ts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
-    rightText:SetShadowOffset(1, -1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, ts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
-    centerText:SetShadowOffset(1, -1)
     frame.CenterText = centerText
 
     -- Backward compat aliases
@@ -3051,8 +3059,7 @@ local function StylePetFrame(frame, unit)
     -- Always create portrait; hide backdrop when disabled
     frame.Portrait = CreatePortrait(frame, "left", settings.healthHeight, unit)
     frame._portraitSide = "left"
-    if frame.Portrait and not showPortrait then
-        frame.Portrait.backdrop:Hide()
+    if frame.Portrait and not showPortrait then        frame.Portrait.backdrop:Hide()
     end
 
     CreateUnifiedBorder(frame, unit)
@@ -3073,21 +3080,18 @@ local function StylePetFrame(frame, unit)
     SetFSFont(leftText, ts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
-    leftText:SetShadowOffset(1, -1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, ts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
-    rightText:SetShadowOffset(1, -1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, ts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
-    centerText:SetShadowOffset(1, -1)
     frame.CenterText = centerText
 
     frame.NameText = leftText
@@ -3198,21 +3202,18 @@ local function StyleBossFrame(frame, unit)
     SetFSFont(leftText, bts)
     leftText:SetWordWrap(false)
     leftText:SetTextColor(1, 1, 1)
-    leftText:SetShadowOffset(1, -1)
     frame.LeftText = leftText
 
     local rightText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(rightText, bts)
     rightText:SetWordWrap(false)
     rightText:SetTextColor(1, 1, 1)
-    rightText:SetShadowOffset(1, -1)
     frame.RightText = rightText
 
     local centerText = textOverlay:CreateFontString(nil, "OVERLAY")
     SetFSFont(centerText, bts)
     centerText:SetWordWrap(false)
     centerText:SetTextColor(1, 1, 1)
-    centerText:SetShadowOffset(1, -1)
     frame.CenterText = centerText
 
     frame.NameText = leftText
@@ -4444,6 +4445,7 @@ local function ReloadFrames()
                     -- Debuffs
                     if frame.Debuffs then
                         frame.Debuffs.num = settings.maxDebuffs or 20
+                        frame.Debuffs.onlyShowPlayer = settings.onlyPlayerDebuffs and true or nil
                         local dfp, dia, dgx, dgy, dox, doy = ResolveBuffLayout(
                             settings.debuffAnchor or "bottomleft",
                             settings.debuffGrowth or "auto"
@@ -4457,7 +4459,7 @@ local function ReloadFrames()
                                 liveDbCbOff = -cbH
                             end
                         end
-                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 20) .. liveDbCbOff
+                        local debuffKey = (dia or "") .. (dfp or "") .. (dox or 0) .. (doy or 0) .. (dgx or 0) .. (dgy or 0) .. (settings.maxDebuffs or 20) .. liveDbCbOff .. (settings.onlyPlayerDebuffs and "1" or "0")
                         if frame.Debuffs._lastDebuffKey ~= debuffKey then
                             frame.Debuffs._lastDebuffKey = debuffKey
                             frame.Debuffs:ClearAllPoints()
@@ -4838,7 +4840,10 @@ local function ReloadFrames()
             local function SetMiniFont(fs, sz)
                 if not fs or not fs.SetFont then return end
                 if isMiniFrame then
-                    fs:SetFont(donorFontPath, sz or 12, "SHADOW")
+                    local f = (EllesmereUI and EllesmereUI.GetFontOutlineFlag and EllesmereUI.GetFontOutlineFlag()) or ""
+                    fs:SetFont(donorFontPath, sz or 12, f)
+                    if f == "" then fs:SetShadowOffset(1, -1); fs:SetShadowColor(0, 0, 0, 1)
+                    else fs:SetShadowOffset(0, 0) end
                 else
                     SetFSFont(fs, sz)
                 end
@@ -5059,7 +5064,6 @@ function InitializeFrames()
             local restText = restHolder:CreateFontString(nil, "OVERLAY")
             SetFSFont(restText, 9)
             restText:SetTextColor(1, 1, 1)
-            restText:SetShadowOffset(1, -1)
             restText:SetText("ZZZ")
             restText:SetPoint("TOPLEFT", pf.Health, "TOPLEFT", 3, -2)
             restText:Hide()
@@ -5080,11 +5084,30 @@ function InitializeFrames()
         end
     end
 
-    if db.profile.player.showPlayerCastbar and PlayerCastingBarFrame then
+    -- Always suppress the Blizzard default castbar — we have our own.
+    -- This must run unconditionally so zone changes (portals, etc.) can't
+    -- re-show it even when the player castbar setting is disabled.
+    if PlayerCastingBarFrame then
         PlayerCastingBarFrame:UnregisterAllEvents()
         PlayerCastingBarFrame:Hide()
         PlayerCastingBarFrame:SetScript("OnUpdate", nil)
-        hooksecurefunc(PlayerCastingBarFrame, "Show", function(self) self:Hide() end)
+        if not PlayerCastingBarFrame._euiShowHooked then
+            PlayerCastingBarFrame._euiShowHooked = true
+            hooksecurefunc(PlayerCastingBarFrame, "Show", function(self) self:Hide() end)
+        end
+    end
+    -- Re-suppress after zone changes: Blizzard re-registers events on PlayerCastingBarFrame
+    -- on PLAYER_ENTERING_WORLD, which lets it show again on the next cast.
+    -- The hooksecurefunc on Show above already makes it permanently invisible,
+    -- but hiding it here prevents even a single-frame flash before the hook fires.
+    do
+        local cbSuppressFrame = CreateFrame("Frame")
+        cbSuppressFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+        cbSuppressFrame:SetScript("OnEvent", function()
+            if PlayerCastingBarFrame then
+                PlayerCastingBarFrame:Hide()
+            end
+        end)
     end
 
     -- Resize frame and portrait to account for class power pips above health bar
@@ -5530,10 +5553,33 @@ function InitializeFrames()
                 if shouldShow then
                     if not frame:IsShown() and UnitExists(unitKey) then
                         frame:SetAttribute("unit", unitKey)
-                        -- Re-enable oUF elements that were disabled on hide
-                        for _, elem in ipairs({"Health", "Power", "Portrait", "Castbar", "Buffs", "Debuffs", "HealthPrediction"}) do
+                        -- Re-enable oUF elements that were disabled on hide.
+                        -- Castbar is handled separately below to respect the
+                        -- user's show/hide setting — never blindly re-enable it.
+                        for _, elem in ipairs({"Health", "Power", "Portrait", "Buffs", "Debuffs", "HealthPrediction"}) do
                             if frame[elem] and not frame:IsElementEnabled(elem) then
                                 frame:EnableElement(elem)
+                            end
+                        end
+                        -- Restore castbar state based on saved setting
+                        if frame.Castbar then
+                            local wantsCastbar
+                            if unitKey == "player" then
+                                wantsCastbar = s.showPlayerCastbar
+                            else
+                                wantsCastbar = s.showCastbar ~= false
+                            end
+                            if wantsCastbar then
+                                if not frame:IsElementEnabled("Castbar") then
+                                    frame:EnableElement("Castbar")
+                                end
+                            else
+                                if frame:IsElementEnabled("Castbar") then
+                                    frame:DisableElement("Castbar")
+                                end
+                                frame.Castbar:Hide()
+                                local castbarBg = frame.Castbar:GetParent()
+                                if castbarBg then castbarBg:Hide() end
                             end
                         end
                         frame:Show()
@@ -5799,18 +5845,22 @@ StaticPopupDialogs["ELLESMERE_RESET_DEFAULTS"] = {
 -- 3D portrait warning popup is now handled by EllesmereUI:ShowConfirmPopup
 -- in EUI_UnitFrames_Options.lua (portrait mode dropdown handler).
 
-local EllesmereUF = LibStub("AceAddon-3.0"):NewAddon("EllesmereUIUnitFrames")
+local EllesmereUF = EllesmereUI.Lite.NewAddon("EllesmereUIUnitFrames")
 
 -- Migrate old shared playerTarget table into separate player/target sub-tables
 local function MigratePlayerTarget()
     local p = db.profile
-    -- Skip if already migrated (player sub-table has been populated)
-    if p.player and p.player.frameWidth and p.player.frameWidth ~= defaults.profile.player.frameWidth then return end
-    -- Also skip if the old table doesn't exist
+    -- Use a dedicated flag so this migration runs exactly once.
+    -- The old guard (checking frameWidth != default) was unreliable: users
+    -- with frameWidth at the default value would re-run migration every load,
+    -- overwriting their saved healthHeight/powerHeight with the old defaults.
+    if p._playerTargetMigrated then return end
+    -- Skip if the old table doesn't exist (new installs)
     local old = p.playerTarget
-    if not old then return end
-    -- Only migrate if the old table has been customized (not just defaults)
-    -- We check if any value differs from the default playerTarget
+    if not old then
+        p._playerTargetMigrated = true
+        return
+    end
     local oldDef = defaults.profile.playerTarget
 
     -- Copy shared values into player table
@@ -5842,22 +5892,13 @@ local function MigratePlayerTarget()
     p.target.onlyPlayerDebuffs = old.onlyPlayerDebuffs or false
     p.target.showPortrait = p.showPortrait  -- migrate from root level
 
+    -- Mark as done so this never runs again
+    p._playerTargetMigrated = true
     -- Leave old playerTarget intact for backward compat
 end
 
 function EllesmereUF:OnInitialize()
-    -- Bail out if user has disabled this addon in Global Settings
-    if EllesmereUIDB and EllesmereUIDB.disabledAddons and EllesmereUIDB.disabledAddons[addonName] then
-        self._userDisabled = true
-        return
-    end
-
-    local AceDB = LibStub("AceDB-3.0", true)
-    if AceDB then
-        db = AceDB:New("EllesmereUIUnitFramesDB", defaults, true)
-    else
-        db = { profile = defaults.profile }
-    end
+    db = EllesmereUI.Lite.NewDB("EllesmereUIUnitFramesDB", defaults, true)
     MigratePlayerTarget()
     -- Migrate old use3DPortrait boolean to new portraitMode string (one-time)
     do
@@ -6003,58 +6044,15 @@ function EllesmereUF:OnInitialize()
     end
 
     -- Minimap button (shared across all Ellesmere addons Ã¢â‚¬â€ first to load wins)
-    if not _EllesmereUI_MinimapRegistered then
-        local ok, LDB = pcall(LibStub, "LibDataBroker-1.1")
-        local ok2, LDBIcon = pcall(LibStub, "LibDBIcon-1.0")
-        if ok and ok2 and LDB and LDBIcon then
-            local dataObj = LDB:NewDataObject("EllesmereUI", {
-                type = "launcher",
-                icon = "Interface\\AddOns\\EllesmereUI\\media\\eg-logo.tga",
-                OnClick = function(self, button)
-                    if InCombatLockdown() then return end
-                    if button == "LeftButton" then
-                        if EllesmereUI then EllesmereUI:Toggle() end
-                    elseif button == "RightButton" then
-                        if EllesmereUI and EllesmereUI._openUnlockMode then
-                            EllesmereUI._openUnlockMode()
-                        end
-                    elseif button == "MiddleButton" then
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.showMinimapButton = false
-                        if LDBIcon:IsRegistered("EllesmereUI") then
-                            local btn = LDBIcon:GetMinimapButton("EllesmereUI")
-                            if btn and btn.db then btn.db.hide = true end
-                            LDBIcon:Hide("EllesmereUI")
-                        end
-                        local rl = EllesmereUI and EllesmereUI._widgetRefreshList
-                        if rl then for i = 1, #rl do rl[i]() end end
-                    end
-                end,
-                OnTooltipShow = function(tt)
-                    tt:AddLine("|cff0cd29fEllesmereUI|r")
-                    tt:AddLine("|cff0cd29dLeft-click:|r |cffE0E0E0Toggle EllesmereUI|r")
-                    tt:AddLine("|cff0cd29dRight-click:|r |cffE0E0E0Enter Unlock Mode|r")
-                    tt:AddLine("|cff0cd29dMiddle-click:|r |cffE0E0E0Hide Minimap Button|r")
-                end,
-            })
-            if dataObj then
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                if not EllesmereUIDB.minimapIcon then EllesmereUIDB.minimapIcon = {} end
-                if EllesmereUIDB.showMinimapButton == false then
-                    EllesmereUIDB.minimapIcon.hide = true
-                end
-                LDBIcon:Register("EllesmereUI", dataObj, EllesmereUIDB.minimapIcon)
-                _EllesmereUI_MinimapRegistered = true
-            end
-        end
+    -- Minimap button (handled by parent addon)
+    if not _EllesmereUI_MinimapRegistered and EllesmereUI and EllesmereUI.CreateMinimapButton then
+        EllesmereUI.CreateMinimapButton()
     end
 
     -- Blizzard options panel is registered centrally in EllesmereUI.lua
 end
 
 function EllesmereUF:OnEnable()
-    if self._userDisabled then return end
-
     InitializeFrames()
     C_Timer.After(0, SetupOptionsPanel)
     C_Timer.After(0, function()

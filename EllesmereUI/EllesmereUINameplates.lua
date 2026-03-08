@@ -1,4 +1,4 @@
-local addon, ns = ...
+﻿local addon, ns = ...
 
 local pairs, ipairs, type = pairs, ipairs, type
 local PP = EllesmereUI.PP
@@ -2321,7 +2321,7 @@ local function DarkenColor(r, g, b, factor)
 end
 -- Cached threat-context state — updated at zone transitions and spec changes
 local _inThreatContent = false
-local _isTankRole      = false
+local _isTankRole      = false -- MARKER_TEST
 
 local function RefreshThreatCache()
     -- Zone: party/raid instances and delves (difficultyID 204) are threat-relevant
@@ -2436,13 +2436,20 @@ local function GetReactionColor(unit)
     --   â€¢ Non-tank: has aggro, near aggro
     --   â€¢ Tank: losing aggro, no aggro
     local isThreatUnit = false   -- set true when threat data exists
+    local isTankRole   = false
     local threatStatus = 0
     if InRealInstancedContent() then
         local status = UnitThreatSituation("player", unit)
         if status then
             isThreatUnit = true
             threatStatus = status
-            if not _isTankRole then
+            local role = UnitGroupRolesAssigned("player")
+            if role == "NONE" and GetSpecializationRole then
+                local spec = GetSpecialization()
+                if spec then role = GetSpecializationRole(spec) or "NONE" end
+            end
+            isTankRole = (role == "TANK")
+            if not isTankRole then
                 -- Non-tank: has aggro / near aggro â€” absolute priority
                 -- Only apply when in a group (solo players always have aggro)
                 if IsInGroup() then
@@ -2457,14 +2464,7 @@ local function GetReactionColor(unit)
                 if status < 3 and status >= 2 then
                     return db.tankLosingAggro.r, db.tankLosingAggro.g, db.tankLosingAggro.b
                 elseif status < 3 then
-                    -- Only show no-aggro warning if a non-tank has it.
-                    -- If another tank holds aggro, this is normal offtank positioning.
-                    local unitTarget = unit .. "target"
-                    local targetRole = UnitExists(unitTarget) and UnitGroupRolesAssigned(unitTarget) or "NONE"
-                    if targetRole ~= "TANK" then
-                        return db.tankNoAggro.r, db.tankNoAggro.g, db.tankNoAggro.b
-                    end
-                    -- Another tank has aggro -- fall through, no warning color
+                    return db.tankNoAggro.r, db.tankNoAggro.g, db.tankNoAggro.b
                 end
                 -- Tank has aggro falls through to be handled below focus/caster/miniboss
             end
@@ -2518,7 +2518,7 @@ local function GetReactionColor(unit)
         end
     end
     -- 9. Tank has aggro (if enabled) â€” below focus/caster/miniboss
-    if isThreatUnit and _isTankRole and threatStatus >= 3 then
+    if isThreatUnit and isTankRole and threatStatus >= 3 then
         local enabled = defaults.tankHasAggroEnabled
         if db.tankHasAggroEnabled ~= nil then enabled = db.tankHasAggroEnabled end
         if enabled then
@@ -4214,7 +4214,6 @@ end
 factionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 factionFrame:SetScript("OnEvent", function(_, event, unit)
     if event == "PLAYER_ENTERING_WORLD" then
-        RefreshThreatCache()
         UpdateFactionFrameForZone()
         return
     end
@@ -4545,7 +4544,6 @@ do
     specLoginFrame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
     specLoginFrame:SetScript("OnEvent", function(_, event, unit)
         if unit ~= "player" then return end
-        RefreshThreatCache()
         -- If the framework handler is registered, let it handle this
         if EllesmereUI and EllesmereUI._specSwitchRegistry
            and #EllesmereUI._specSwitchRegistry > 0 then

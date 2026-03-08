@@ -1,6 +1,6 @@
 local ADDON_NAME = ...
 
-local ECL = LibStub("AceAddon-3.0"):NewAddon("EllesmereUICursor", "AceEvent-3.0")
+local ECL = EllesmereUI.Lite.NewAddon("EllesmereUICursor")
 
 local TEX_CUSTOM = "Interface\\AddOns\\EllesmereUICursor\\Media\\ellesmere_cursor.tga"
 
@@ -64,52 +64,9 @@ local function InRealInstancedContent()
 end
 
 -------------------------------------------------------------------------------
---  Cursor visibility
+--  Cursor visibility (forward declaration — defined after trail/GCD/cast locals)
 -------------------------------------------------------------------------------
-local function UpdateVisibility()
-    if not f then return end
-    local p = ECL.db.profile
-    local shouldShow = (p.enabled ~= false)
-    if shouldShow and p.instanceOnly then
-        shouldShow = InRealInstancedContent()
-    end
-    if shouldShow and not isVisible then
-        isVisible = true
-        f:Show()
-    elseif not shouldShow and isVisible then
-        isVisible = false
-        f:Hide()
-    end
-
-    -- Trail: hide dots and suppress spawning when circle is hidden
-    if not shouldShow and trailEnabled then
-        HideTrailDots()
-    end
-
-    -- GCD circle instance-only check
-    if gcdRoot then
-        local g = GCD_DB()
-        if g.enabled then
-            if g.instanceOnly and not InRealInstancedContent() then
-                gcdRoot:Hide()
-            else
-                gcdRoot:Show()
-            end
-        end
-    end
-
-    -- Cast circle instance-only check
-    if castRoot then
-        local c = Cast_DB()
-        if c.enabled then
-            if c.instanceOnly and not InRealInstancedContent() then
-                castRoot:Hide()
-            else
-                castRoot:Show()
-            end
-        end
-    end
-end
+local UpdateVisibility
 
 local lastUseClassColor
 
@@ -252,30 +209,42 @@ local function ApplyTrail()
 
     if not trailEnabled then
         HideTrailDots()
+        if trailContainer then trailContainer:SetScript("OnUpdate", nil) end
         return
     end
 
     if #trailDots == 0 and #trailActive == 0 then
         InitTrailDotPool()
     end
-end
 
-local function TrailOnUpdate(elapsed)
-    if not trailEnabled then return end
-    -- Instance-only: immediately hide all dots, don't let them fade
-    if not isVisible then HideTrailDots(); return end
+    -- Trail runs on trailContainer (always visible) so it keeps ticking
+    -- even when the cursor circle frame is hidden (disabled or instance-only).
+    if trailContainer and not trailContainer:GetScript("OnUpdate") then
+        trailContainer:SetScript("OnUpdate", function(_, elapsed)
+            if not trailEnabled then return end
 
-    local cx, cy = GetCursorPosition()
-    trailTimer = trailTimer + elapsed
-    local dx = cx - trailLastCX
-    local dy = cy - trailLastCY
-    local moved = (dx * dx + dy * dy) ^ 0.5
-    if trailTimer >= TRAIL_DOT_DENSITY and moved >= 0.5 then
-        trailTimer = 0
-        SpawnTrailDot(cx, cy)
-        trailLastCX, trailLastCY = cx, cy
+            local p = ECL.db and ECL.db.profile
+            local circleEnabled = p and p.enabled ~= false
+            local inInstance = not (p and p.instanceOnly) or InRealInstancedContent()
+
+            -- Only spawn new dots when the cursor circle would be visible
+            if circleEnabled and inInstance then
+                local cx, cy = GetCursorPosition()
+                trailTimer = trailTimer + elapsed
+                local dx = cx - trailLastCX
+                local dy = cy - trailLastCY
+                local moved = (dx * dx + dy * dy) ^ 0.5
+                if trailTimer >= TRAIL_DOT_DENSITY and moved >= 0.5 then
+                    trailTimer = 0
+                    SpawnTrailDot(cx, cy)
+                    trailLastCX, trailLastCY = cx, cy
+                end
+            end
+
+            -- Always update (fade/shrink) active dots so they finish animating
+            UpdateTrailDots(elapsed)
+        end)
     end
-    UpdateTrailDots(elapsed)
 end
 
 local function OnUpdate(_, elapsed)
@@ -286,7 +255,6 @@ local function OnUpdate(_, elapsed)
         lastX, lastY = x, y
         f:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
     end
-    TrailOnUpdate(elapsed)
 end
 
 -------------------------------------------------------------------------------
@@ -482,13 +450,27 @@ local function ApplyGCDCircle()
             gcdRoot:Hide()
         end
         if attached then
-            -- Follow cursor: anchor to cursor frame directly (avoids duplicate OnUpdate)
-            gcdRoot:SetScript("OnUpdate", nil)
-            gcdRoot:ClearAllPoints()
-            if f then
+            -- When the cursor circle is visible, anchor directly to it.
+            -- When the cursor circle is hidden (e.g. instance-only outside an instance),
+            -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
+            -- In that case we give the GCD circle its own cursor-tracking OnUpdate.
+            local cursorVisible = f and f:IsShown()
+            if cursorVisible then
+                gcdRoot:SetScript("OnUpdate", nil)
+                gcdRoot:ClearAllPoints()
                 gcdRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
             else
-                gcdRoot:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                gcdRoot:ClearAllPoints()
+                gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
+                local s = UIParent:GetEffectiveScale()
+                local cx, cy = GetCursorPosition()
+                gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
+                gcdRoot:SetScript("OnUpdate", function()
+                    local sc = UIParent:GetEffectiveScale()
+                    local mx, my = GetCursorPosition()
+                    gcdRoot:ClearAllPoints()
+                    gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+                end)
             end
         else
             gcdRoot:SetScript("OnUpdate", nil)
@@ -510,6 +492,87 @@ local castAttached = true
 local function Cast_DB()
     local p = ECL.db and ECL.db.profile
     return p and p.castCircle or {}
+end
+
+-- Defined here so it closes over the real trailEnabled, HideTrailDots,
+-- gcdRoot, GCD_DB, castRoot, and Cast_DB locals declared above.
+UpdateVisibility = function()
+    if not f then return end
+    local p = ECL.db.profile
+    local shouldShow = (p.enabled ~= false)
+    if shouldShow and p.instanceOnly then
+        shouldShow = InRealInstancedContent()
+    end
+    if shouldShow and not isVisible then
+        isVisible = true
+        f:Show()
+    elseif not shouldShow and isVisible then
+        isVisible = false
+        f:Hide()
+    end
+
+    -- Trail: hide dots and suppress spawning when circle is hidden
+    if not shouldShow and trailEnabled then
+        HideTrailDots()
+    end
+
+    -- GCD circle instance-only check
+    if gcdRoot then
+        local g = GCD_DB()
+        if g.enabled then
+            if g.instanceOnly and not InRealInstancedContent() then
+                gcdRoot:Hide()
+                gcdRoot:SetScript("OnUpdate", nil)
+            else
+                gcdRoot:Show()
+                -- Re-apply cursor tracking since cursor visibility may have changed
+                if g.attached ~= false then
+                    local cursorVisible = f and f:IsShown()
+                    if cursorVisible then
+                        gcdRoot:SetScript("OnUpdate", nil)
+                        gcdRoot:ClearAllPoints()
+                        gcdRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
+                    else
+                        gcdRoot:SetScript("OnUpdate", function()
+                            local sc = UIParent:GetEffectiveScale()
+                            local mx, my = GetCursorPosition()
+                            gcdRoot:ClearAllPoints()
+                            gcdRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+                        end)
+                    end
+                end
+            end
+        end
+    end
+
+    -- Cast circle instance-only check
+    if castRoot then
+        local c = Cast_DB()
+        if c.enabled then
+            if c.instanceOnly and not InRealInstancedContent() then
+                castRoot:Hide()
+                castRoot:SetScript("OnUpdate", nil)
+            else
+                castRoot:Show()
+                -- Re-apply cursor tracking since cursor visibility may have changed
+                if c.attached ~= false then
+                    local cursorVisible = f and f:IsShown()
+                    if cursorVisible then
+                        castRoot:SetScript("OnUpdate", nil)
+                        castRoot:ClearAllPoints()
+                        castRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
+                    else
+                        castRoot:SetScript("OnUpdate", function()
+                            local sc = UIParent:GetEffectiveScale()
+                            local mx, my = GetCursorPosition()
+                            castRoot:ClearAllPoints()
+                            castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+                        end)
+                    end
+                end
+            end
+        end
+    end
 end
 
 local function CreateCastCircle()
@@ -716,13 +779,27 @@ local function ApplyCastCircle()
             castRoot:Hide()
         end
         if attached then
-            -- Follow cursor: anchor to cursor frame directly (avoids duplicate OnUpdate)
-            castRoot:SetScript("OnUpdate", nil)
-            castRoot:ClearAllPoints()
-            if f then
+            -- When the cursor circle is visible, anchor directly to it.
+            -- When the cursor circle is hidden (e.g. instance-only outside an instance),
+            -- the cursor frame's OnUpdate stops firing so it no longer tracks the mouse.
+            -- In that case we give the cast circle its own cursor-tracking OnUpdate.
+            local cursorVisible = f and f:IsShown()
+            if cursorVisible then
+                castRoot:SetScript("OnUpdate", nil)
+                castRoot:ClearAllPoints()
                 castRoot:SetPoint("CENTER", f, "CENTER", 0, 0)
             else
-                castRoot:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+                castRoot:ClearAllPoints()
+                castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", 0, 0)
+                local s = UIParent:GetEffectiveScale()
+                local cx, cy = GetCursorPosition()
+                castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(cx / s + 0.5), floor(cy / s + 0.5))
+                castRoot:SetScript("OnUpdate", function()
+                    local sc = UIParent:GetEffectiveScale()
+                    local mx, my = GetCursorPosition()
+                    castRoot:ClearAllPoints()
+                    castRoot:SetPoint("CENTER", UIParent, "BOTTOMLEFT", floor(mx / sc + 0.5), floor(my / sc + 0.5))
+                end)
             end
         else
             castRoot:SetScript("OnUpdate", nil)
@@ -882,13 +959,7 @@ end
 --  Initialization
 -------------------------------------------------------------------------------
 function ECL:OnInitialize()
-    -- Bail out if user has disabled this addon in Global Settings
-    if EllesmereUIDB and EllesmereUIDB.disabledAddons and EllesmereUIDB.disabledAddons[ADDON_NAME] then
-        self._userDisabled = true
-        return
-    end
-
-    self.db = LibStub("AceDB-3.0"):New("EllesmereUICursorDB", {
+    self.db = EllesmereUI.Lite.NewDB("EllesmereUICursorDB", {
         profile = {
             enabled = true,
             instanceOnly = DEF_INSTANCE_ONLY,
@@ -936,53 +1007,10 @@ function ECL:OnInitialize()
 end
 
 function ECL:OnEnable()
-    if self._userDisabled then return end
-
     -- Minimap button (shared across all Ellesmere addons â€” first to load wins)
-    if not _EllesmereUI_MinimapRegistered then
-        local ok, LDB = pcall(LibStub, "LibDataBroker-1.1")
-        local ok2, LDBIcon = pcall(LibStub, "LibDBIcon-1.0")
-        if ok and ok2 and LDB and LDBIcon then
-            local dataObj = LDB:NewDataObject("EllesmereUI", {
-                type = "launcher",
-                icon = "Interface\\AddOns\\EllesmereUI\\media\\eg-logo.tga",
-                OnClick = function(self, button)
-                    if InCombatLockdown() then return end
-                    if button == "LeftButton" then
-                        if EllesmereUI then EllesmereUI:Toggle() end
-                    elseif button == "RightButton" then
-                        if EllesmereUI and EllesmereUI._openUnlockMode then
-                            EllesmereUI._openUnlockMode()
-                        end
-                    elseif button == "MiddleButton" then
-                        if not EllesmereUIDB then EllesmereUIDB = {} end
-                        EllesmereUIDB.showMinimapButton = false
-                        if LDBIcon:IsRegistered("EllesmereUI") then
-                            local btn = LDBIcon:GetMinimapButton("EllesmereUI")
-                            if btn and btn.db then btn.db.hide = true end
-                            LDBIcon:Hide("EllesmereUI")
-                        end
-                        local rl = EllesmereUI and EllesmereUI._widgetRefreshList
-                        if rl then for i = 1, #rl do rl[i]() end end
-                    end
-                end,
-                OnTooltipShow = function(tt)
-                    tt:AddLine("|cff0cd29fEllesmereUI|r")
-                    tt:AddLine("|cff0cd29dLeft-click:|r |cffE0E0E0Toggle EllesmereUI|r")
-                    tt:AddLine("|cff0cd29dRight-click:|r |cffE0E0E0Enter Unlock Mode|r")
-                    tt:AddLine("|cff0cd29dMiddle-click:|r |cffE0E0E0Hide Minimap Button|r")
-                end,
-            })
-            if dataObj then
-                if not EllesmereUIDB then EllesmereUIDB = {} end
-                if not EllesmereUIDB.minimapIcon then EllesmereUIDB.minimapIcon = {} end
-                if EllesmereUIDB.showMinimapButton == false then
-                    EllesmereUIDB.minimapIcon.hide = true
-                end
-                LDBIcon:Register("EllesmereUI", dataObj, EllesmereUIDB.minimapIcon)
-                _EllesmereUI_MinimapRegistered = true
-            end
-        end
+    -- Minimap button (handled by parent addon)
+    if not _EllesmereUI_MinimapRegistered and EllesmereUI and EllesmereUI.CreateMinimapButton then
+        EllesmereUI.CreateMinimapButton()
     end
 
     f = CreateFrame("Frame", "EllesmereUICursorFrame", UIParent)
