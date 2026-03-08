@@ -2477,6 +2477,17 @@ local function AttachTooltipHooks(barKey)
     if not frame or not buttons then return end
     local info = BAR_LOOKUP[barKey]
 
+    -- Force-enable mouse motion on every button.  Reparenting into a
+    -- SecureHandlerStateTemplate can silently clear MouseMotionEnabled,
+    -- which prevents both HighlightTexture and OnEnter from firing.
+    for i = 1, #buttons do
+        local btn = buttons[i]
+        if btn then
+            if btn.SetMouseMotionEnabled then btn:SetMouseMotionEnabled(true) end
+            if btn.SetMouseClickEnabled  then btn:SetMouseClickEnabled(true)  end
+        end
+    end
+
     local state = { currentBtn = nil, elapsed = 0 }
     _ttStates[barKey] = state
 
@@ -2489,6 +2500,12 @@ local function AttachTooltipHooks(barKey)
             if state.currentBtn then
                 if GameTooltip:GetOwner() == state.currentBtn then
                     GameTooltip:Hide()
+                end
+                -- Hide highlight on the button we are leaving
+                local ht = state.currentBtn.HighlightTexture
+                if ht and ht._eabManualHL then
+                    ht._eabManualHL = false
+                    ht:Hide()
                 end
                 state.currentBtn = nil
             end
@@ -2524,15 +2541,32 @@ local function AttachTooltipHooks(barKey)
         end
 
         if foundBtn then
-            -- Show or refresh tooltip when hovering a new button, or if
-            -- something else hid the tooltip while cursor stayed on the button
             if foundBtn ~= state.currentBtn or GameTooltip:GetOwner() ~= foundBtn then
+                -- Hide highlight on the previous button
+                if state.currentBtn and state.currentBtn ~= foundBtn then
+                    local ht = state.currentBtn.HighlightTexture
+                    if ht and ht._eabManualHL then
+                        ht._eabManualHL = false
+                        ht:Hide()
+                    end
+                end
                 ShowTooltipForButton(foundBtn, info)
+                -- Show highlight on the hovered button
+                local ht = foundBtn.HighlightTexture
+                if ht and not ht._eabManualHL then
+                    ht._eabManualHL = true
+                    ht:Show()
+                end
                 state.currentBtn = foundBtn
             end
         elseif state.currentBtn then
             if GameTooltip:GetOwner() == state.currentBtn then
                 GameTooltip:Hide()
+            end
+            local ht = state.currentBtn.HighlightTexture
+            if ht and ht._eabManualHL then
+                ht._eabManualHL = false
+                ht:Hide()
             end
             state.currentBtn = nil
         end
@@ -4278,6 +4312,24 @@ function EAB:FinishSetup()
     for _, info in ipairs(BAR_CONFIG) do
         AttachTooltipHooks(info.key)
     end
+
+    -- Deferred re-enable: DoVisuals runs 0.1 s after setup and may call
+    -- ApplyClickThroughForBar which resets mouse state.  Force-enable
+    -- mouse motion on ALL buttons after visuals have fully applied.
+    C_Timer_After(0.5, function()
+        if InCombatLockdown() then return end
+        for _, inf in ipairs(BAR_CONFIG) do
+            local btns = barButtons[inf.key]
+            if btns then
+                for i = 1, #btns do
+                    local b = btns[i]
+                    if b and b.SetMouseMotionEnabled then
+                        b:SetMouseMotionEnabled(true)
+                    end
+                end
+            end
+        end
+    end)
 
     -- When a spell flyout closes, fade out any bars that were kept visible by it
     if SpellFlyout then
