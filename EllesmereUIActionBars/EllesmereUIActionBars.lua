@@ -2501,12 +2501,7 @@ local function AttachTooltipHooks(barKey)
                 if GameTooltip:GetOwner() == state.currentBtn then
                     GameTooltip:Hide()
                 end
-                -- Hide highlight on the button we are leaving
-                local ht = state.currentBtn.HighlightTexture
-                if ht and ht._eabManualHL then
-                    ht._eabManualHL = false
-                    ht:Hide()
-                end
+                state.currentBtn:UnlockHighlight()
                 state.currentBtn = nil
             end
             return
@@ -2542,32 +2537,18 @@ local function AttachTooltipHooks(barKey)
 
         if foundBtn then
             if foundBtn ~= state.currentBtn or GameTooltip:GetOwner() ~= foundBtn then
-                -- Hide highlight on the previous button
                 if state.currentBtn and state.currentBtn ~= foundBtn then
-                    local ht = state.currentBtn.HighlightTexture
-                    if ht and ht._eabManualHL then
-                        ht._eabManualHL = false
-                        ht:Hide()
-                    end
+                    state.currentBtn:UnlockHighlight()
                 end
                 ShowTooltipForButton(foundBtn, info)
-                -- Show highlight on the hovered button
-                local ht = foundBtn.HighlightTexture
-                if ht and not ht._eabManualHL then
-                    ht._eabManualHL = true
-                    ht:Show()
-                end
+                foundBtn:LockHighlight()
                 state.currentBtn = foundBtn
             end
         elseif state.currentBtn then
             if GameTooltip:GetOwner() == state.currentBtn then
                 GameTooltip:Hide()
             end
-            local ht = state.currentBtn.HighlightTexture
-            if ht and ht._eabManualHL then
-                ht._eabManualHL = false
-                ht:Hide()
-            end
+            state.currentBtn:UnlockHighlight()
             state.currentBtn = nil
         end
     end)
