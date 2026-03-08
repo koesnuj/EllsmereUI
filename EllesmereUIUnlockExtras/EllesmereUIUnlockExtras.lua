@@ -1,6 +1,7 @@
 -------------------------------------------------------------------------------
 --  EllesmereUIUnlockExtras.lua
---  Registers Vehicle Leave, Queue Status, Loot Frame, and Loot Roll
+--  Registers Vehicle Leave, Queue Status, Loot Frame, Loot Roll,
+--  LFG Ready Popup, Ready Check, Bonus Roll, and Alert Toasts
 --  as movable elements in EllesmereUI's Unlock Mode.
 --
 --  Uses EllesmereUI.Lite profile system — positions are per-profile and
@@ -21,6 +22,10 @@ local defaults = {
         queueStatus  = { enabled = true },
         lootFrame    = { enabled = true },
         lootRoll     = { enabled = true },
+        lfgReadyPopup = { enabled = true },
+        readyCheck    = { enabled = true },
+        bonusRoll     = { enabled = true },
+        alertToasts   = { enabled = true },
     },
 }
 
@@ -375,6 +380,272 @@ local function GetLootRollElement()
     }
 end
 
+-------------------------------------------------------------------------------
+--  5. LFG Ready Popup
+--
+--  Blizzard frame: LFGDungeonReadyPopup
+--  Shows when a dungeon/raid/battleground queue pops.
+--  Pattern: Create holder → hook OnShow to reposition after Blizzard places it
+-------------------------------------------------------------------------------
+local lfgReadyHolder
+
+local function SetupLFGReadyPopup()
+    local popup = _G.LFGDungeonReadyPopup
+    if not popup then return end
+
+    lfgReadyHolder = CreateFrame("Frame", "EllesmereUIUnlockExtras_LFGReadyHolder", UIParent)
+    lfgReadyHolder:SetSize(230, 195)
+    lfgReadyHolder:SetPoint("CENTER", UIParent, "CENTER", 0, 100)
+
+    ApplyPositionToHolder("LFGReadyPopup", lfgReadyHolder)
+
+    -- Reposition after Blizzard's StaticPopupSpecial_Show places the popup
+    popup:HookScript("OnShow", function(self)
+        if InCombatLockdown() or not lfgReadyHolder then return end
+        C_Timer.After(0, function()
+            if InCombatLockdown() or not self:IsShown() then return end
+            pcall(function()
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", lfgReadyHolder, "CENTER")
+            end)
+        end)
+    end)
+end
+
+local function GetLFGReadyPopupElement()
+    return {
+        key   = "LFGReadyPopup",
+        label = "LFG Ready Popup",
+        order = 204,
+        getFrame = function()
+            return lfgReadyHolder
+        end,
+        getSize = function()
+            local f = _G.LFGDungeonReadyPopup
+            if f and f:IsShown() then
+                local w, h = f:GetSize()
+                if w and w > 1 then return w, h, 0 end
+            end
+            return 230, 195, 0
+        end,
+        savePosition  = function(key, point, relPoint, x, y, scale)
+            SavePosition(key, point, relPoint, x, y, scale)
+        end,
+        loadPosition  = function(key) return LoadPosition(key) end,
+        clearPosition = function(key) ClearPosition(key) end,
+        applyPosition = function(key)
+            ApplyPositionToHolder(key, lfgReadyHolder)
+        end,
+        isHidden = function()
+            return not lfgReadyHolder
+        end,
+    }
+end
+
+-------------------------------------------------------------------------------
+--  6. Ready Check
+--
+--  Blizzard frame: ReadyCheckFrame
+--  Shows when a group leader initiates a ready check.
+--  Pattern: Create holder → hook OnShow to reposition
+-------------------------------------------------------------------------------
+local readyCheckHolder
+
+local function SetupReadyCheck()
+    local frame = _G.ReadyCheckFrame
+    if not frame then return end
+
+    readyCheckHolder = CreateFrame("Frame", "EllesmereUIUnlockExtras_ReadyCheckHolder", UIParent)
+    readyCheckHolder:SetSize(280, 80)
+    readyCheckHolder:SetPoint("TOP", UIParent, "TOP", 0, -200)
+
+    ApplyPositionToHolder("ReadyCheck", readyCheckHolder)
+
+    -- Reposition whenever the ready check appears
+    frame:HookScript("OnShow", function(self)
+        if InCombatLockdown() or not readyCheckHolder then return end
+        C_Timer.After(0, function()
+            if InCombatLockdown() or not self:IsShown() then return end
+            pcall(function()
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", readyCheckHolder, "CENTER")
+            end)
+        end)
+    end)
+end
+
+local function GetReadyCheckElement()
+    return {
+        key   = "ReadyCheck",
+        label = "Ready Check",
+        order = 205,
+        getFrame = function()
+            return readyCheckHolder
+        end,
+        getSize = function()
+            local f = _G.ReadyCheckFrame
+            if f and f:IsShown() then
+                local w, h = f:GetSize()
+                if w and w > 1 then return w, h, 0 end
+            end
+            return 280, 80, 0
+        end,
+        savePosition  = function(key, point, relPoint, x, y, scale)
+            SavePosition(key, point, relPoint, x, y, scale)
+        end,
+        loadPosition  = function(key) return LoadPosition(key) end,
+        clearPosition = function(key) ClearPosition(key) end,
+        applyPosition = function(key)
+            ApplyPositionToHolder(key, readyCheckHolder)
+        end,
+        isHidden = function()
+            return not readyCheckHolder
+        end,
+    }
+end
+
+-------------------------------------------------------------------------------
+--  7. Bonus Roll
+--
+--  Blizzard frame: BonusRollFrame
+--  Shows when a bonus roll (coin) is available after a boss kill.
+--  Pattern: Create holder → hook OnShow to reposition
+-------------------------------------------------------------------------------
+local bonusRollHolder
+
+local function SetupBonusRoll()
+    local frame = _G.BonusRollFrame
+    if not frame then return end
+
+    bonusRollHolder = CreateFrame("Frame", "EllesmereUIUnlockExtras_BonusRollHolder", UIParent)
+    bonusRollHolder:SetSize(280, 56)
+    bonusRollHolder:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, 260)
+
+    ApplyPositionToHolder("BonusRoll", bonusRollHolder)
+
+    -- Reposition whenever the bonus roll frame appears
+    frame:HookScript("OnShow", function(self)
+        if InCombatLockdown() or not bonusRollHolder then return end
+        C_Timer.After(0, function()
+            if InCombatLockdown() or not self:IsShown() then return end
+            pcall(function()
+                self:ClearAllPoints()
+                self:SetPoint("CENTER", bonusRollHolder, "CENTER")
+            end)
+        end)
+    end)
+end
+
+local function GetBonusRollElement()
+    return {
+        key   = "BonusRoll",
+        label = "Bonus Roll",
+        order = 206,
+        getFrame = function()
+            return bonusRollHolder
+        end,
+        getSize = function()
+            local f = _G.BonusRollFrame
+            if f and f:IsShown() then
+                local w, h = f:GetSize()
+                if w and w > 1 then return w, h, 0 end
+            end
+            return 280, 56, 0
+        end,
+        savePosition  = function(key, point, relPoint, x, y, scale)
+            SavePosition(key, point, relPoint, x, y, scale)
+        end,
+        loadPosition  = function(key) return LoadPosition(key) end,
+        clearPosition = function(key) ClearPosition(key) end,
+        applyPosition = function(key)
+            ApplyPositionToHolder(key, bonusRollHolder)
+        end,
+        isHidden = function()
+            return not bonusRollHolder
+        end,
+    }
+end
+
+-------------------------------------------------------------------------------
+--  8. Alert Toasts (Loot Won, Loot Upgrade, Achievements, etc.)
+--
+--  Blizzard frame: AlertFrame
+--  Container for all alert toast pop-ups.  Moving AlertFrame moves the
+--  entire alert stack including LootWonAlertFrame, LootUpgradeAlertFrame,
+--  AchievementAlertFrame, and all other toast types.
+--  Pattern: Create holder → remove from managed positions → hook SetPoint
+-------------------------------------------------------------------------------
+local alertToastsHolder
+
+local function SetupAlertToasts()
+    local frame = _G.AlertFrame
+    if not frame then return end
+
+    alertToastsHolder = CreateFrame("Frame", "EllesmereUIUnlockExtras_AlertToastsHolder", UIParent)
+    alertToastsHolder:SetSize(300, 88)
+    alertToastsHolder:SetPoint("TOP", UIParent, "TOP", 0, -50)
+
+    ApplyPositionToHolder("AlertToasts", alertToastsHolder)
+
+    -- Remove from Blizzard's managed frame positioning
+    if _G.UIPARENT_MANAGED_FRAME_POSITIONS then
+        _G.UIPARENT_MANAGED_FRAME_POSITIONS.AlertFrame = nil
+    end
+
+    -- Initial reanchor
+    pcall(function()
+        frame:ClearAllPoints()
+        frame:SetPoint("TOP", alertToastsHolder, "TOP")
+    end)
+
+    -- Guard against Blizzard repositioning
+    hooksecurefunc(frame, "SetPoint", function(self, _, parent)
+        if parent ~= alertToastsHolder then
+            pcall(function()
+                self:ClearAllPoints()
+                self:SetPoint("TOP", alertToastsHolder, "TOP")
+            end)
+        end
+    end)
+end
+
+local function GetAlertToastsElement()
+    return {
+        key   = "AlertToasts",
+        label = "Alert Toasts",
+        order = 207,
+        getFrame = function()
+            return alertToastsHolder
+        end,
+        getSize = function()
+            local f = _G.AlertFrame
+            if f then
+                local w, h = f:GetSize()
+                if w and w > 1 then return w, h, 0 end
+            end
+            return 300, 88, 0
+        end,
+        savePosition  = function(key, point, relPoint, x, y, scale)
+            SavePosition(key, point, relPoint, x, y, scale)
+        end,
+        loadPosition  = function(key) return LoadPosition(key) end,
+        clearPosition = function(key) ClearPosition(key) end,
+        applyPosition = function(key)
+            ApplyPositionToHolder(key, alertToastsHolder)
+            local f = _G.AlertFrame
+            if f and alertToastsHolder then
+                pcall(function()
+                    f:ClearAllPoints()
+                    f:SetPoint("TOP", alertToastsHolder, "TOP")
+                end)
+            end
+        end,
+        isHidden = function()
+            return not alertToastsHolder
+        end,
+    }
+end
+
 
 -------------------------------------------------------------------------------
 --  Registration
@@ -401,6 +672,22 @@ local function RegisterAllElements()
 
     if p.lootRoll.enabled and lootRollHolder then
         elements[#elements + 1] = GetLootRollElement()
+    end
+
+    if p.lfgReadyPopup.enabled and lfgReadyHolder then
+        elements[#elements + 1] = GetLFGReadyPopupElement()
+    end
+
+    if p.readyCheck.enabled and readyCheckHolder then
+        elements[#elements + 1] = GetReadyCheckElement()
+    end
+
+    if p.bonusRoll.enabled and bonusRollHolder then
+        elements[#elements + 1] = GetBonusRollElement()
+    end
+
+    if p.alertToasts.enabled and alertToastsHolder then
+        elements[#elements + 1] = GetAlertToastsElement()
     end
 
 
@@ -449,6 +736,29 @@ local function ApplyAllPositions()
         end
     end
 
+    if lfgReadyHolder then
+        ApplyPositionToHolder("LFGReadyPopup", lfgReadyHolder)
+    end
+
+    if readyCheckHolder then
+        ApplyPositionToHolder("ReadyCheck", readyCheckHolder)
+    end
+
+    if bonusRollHolder then
+        ApplyPositionToHolder("BonusRoll", bonusRollHolder)
+    end
+
+    if alertToastsHolder then
+        ApplyPositionToHolder("AlertToasts", alertToastsHolder)
+        local f = _G.AlertFrame
+        if f then
+            pcall(function()
+                f:ClearAllPoints()
+                f:SetPoint("TOP", alertToastsHolder, "TOP")
+            end)
+        end
+    end
+
 end
 
 -------------------------------------------------------------------------------
@@ -470,6 +780,10 @@ function EUE:OnEnable()
     if p.queueStatus.enabled  then SetupQueueStatus()  end
     if p.lootFrame.enabled    then SetupLootFrame()     end
     if p.lootRoll.enabled     then SetupLootRoll()      end
+    if p.lfgReadyPopup.enabled then SetupLFGReadyPopup() end
+    if p.readyCheck.enabled    then SetupReadyCheck()     end
+    if p.bonusRoll.enabled     then SetupBonusRoll()      end
+    if p.alertToasts.enabled   then SetupAlertToasts()    end
 
 
     -- Register with EllesmereUI's unlock system after a short delay
