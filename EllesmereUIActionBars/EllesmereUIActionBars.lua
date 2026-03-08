@@ -2424,83 +2424,119 @@ end
 
 -------------------------------------------------------------------------------
 --  Tooltip System
---  Reparented buttons lose Blizzard's native OnEnter → SetTooltip() chain.
---  These hooks re-implement tooltip display for all button types so hovering
---  correctly shows GameTooltip regardless of parent frame.
+--  Reparented buttons may not receive native OnEnter events, so Blizzard's
+--  SetTooltip() chain never fires.  Instead of relying on per-button OnEnter,
+--  we poll cursor position against button rects on the bar frame's OnUpdate
+--  (throttled to 0.1 s) and display GameTooltip directly.
 -------------------------------------------------------------------------------
+local _ttStates = {}  -- [barKey] = { currentBtn, elapsed }
+
+local function ShowTooltipForButton(btn, info)
+    if not btn or btn:IsForbidden() then return end
+
+    if info and info.isPetBar then
+        -- Pet action button: tooltip data set by PetActionButtonMixin:Update()
+        if not btn.tooltipName then return end
+        if GetCVar("UberTooltips") == "1" then
+            GameTooltip_SetDefaultAnchor(GameTooltip, btn)
+        else
+            GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+        end
+        if btn.isToken then
+            GameTooltip:SetText(_G[btn.tooltipName], 1, 1, 1)
+        else
+            GameTooltip:SetText(btn.tooltipName, 1, 1, 1)
+        end
+        if btn.tooltipSubtext then
+            GameTooltip:AddLine(btn.tooltipSubtext, "", 0.5, 0.5, 0.5)
+        end
+        GameTooltip:Show()
+    elseif info and info.isStance then
+        -- Stance button: use shapeshift form index (original button ID)
+        local id = btn:GetID()
+        if id and id > 0 and GetShapeshiftFormInfo(id) then
+            GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+            GameTooltip:SetShapeshift(id)
+        end
+    else
+        -- Action button: use action attribute set during SetupBar
+        local action = btn.action or btn:GetAttribute("action")
+        if not action or not HasAction(action) then return end
+        if GetCVar("UberTooltips") == "1" then
+            GameTooltip_SetDefaultAnchor(GameTooltip, btn)
+        else
+            GameTooltip:SetOwner(btn, "ANCHOR_RIGHT")
+        end
+        GameTooltip:SetAction(action)
+    end
+end
+
 local function AttachTooltipHooks(barKey)
+    local frame = barFrames[barKey]
     local buttons = barButtons[barKey]
-    if not buttons then return end
+    if not frame or not buttons then return end
     local info = BAR_LOOKUP[barKey]
 
-    for i = 1, #buttons do
-        local btn = buttons[i]
-        if btn and not btn._eabTooltipHooked then
-            btn:HookScript("OnEnter", function(self)
-                if self:IsForbidden() then return end
-                -- Skip if Blizzard's native handler already set the tooltip
-                if GameTooltip:GetOwner() == self then return end
+    local state = { currentBtn = nil, elapsed = 0 }
+    _ttStates[barKey] = state
 
-                if info and info.isPetBar then
-                    -- Pet action button: tooltip data set by PetActionButtonMixin:Update()
-                    if not self.tooltipName then return end
-                    if GetCVar("UberTooltips") == "1" then
-                        GameTooltip_SetDefaultAnchor(GameTooltip, self)
-                    else
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    end
-                    if self.isToken then
-                        GameTooltip:SetText(_G[self.tooltipName], 1, 1, 1)
-                    else
-                        GameTooltip:SetText(self.tooltipName, 1, 1, 1)
-                    end
-                    if self.tooltipSubtext then
-                        GameTooltip:AddLine(self.tooltipSubtext, "", 0.5, 0.5, 0.5)
-                    end
-                    GameTooltip:Show()
-                elseif info and info.isStance then
-                    -- Stance button: use shapeshift form index (original button ID)
-                    local id = self:GetID()
-                    if id and id > 0 and GetShapeshiftFormInfo(id) then
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                        GameTooltip:SetShapeshift(id)
-                    end
-                else
-                    -- Action button: use action attribute set during SetupBar
-                    local action = self.action or self:GetAttribute("action")
-                    if not action or not HasAction(action) then return end
-                    if GetCVar("UberTooltips") == "1" then
-                        GameTooltip_SetDefaultAnchor(GameTooltip, self)
-                    else
-                        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-                    end
-                    if GameTooltip:SetAction(action) then
-                        self.UpdateTooltip = function(s)
-                            if GameTooltip:GetOwner() ~= s then return end
-                            local act = s.action or s:GetAttribute("action")
-                            if not act or not HasAction(act) then return end
-                            if GetCVar("UberTooltips") == "1" then
-                                GameTooltip_SetDefaultAnchor(GameTooltip, s)
-                            else
-                                GameTooltip:SetOwner(s, "ANCHOR_RIGHT")
-                            end
-                            GameTooltip:SetAction(act)
-                        end
-                    else
-                        self.UpdateTooltip = nil
-                    end
-                end
-            end)
+    frame:HookScript("OnUpdate", function(self, dt)
+        state.elapsed = state.elapsed + dt
+        if state.elapsed < 0.1 then return end
+        state.elapsed = 0
 
-            btn:HookScript("OnLeave", function(self)
-                if GameTooltip:GetOwner() == self then
+        if not self:IsMouseOver() then
+            if state.currentBtn then
+                if GameTooltip:GetOwner() == state.currentBtn then
                     GameTooltip:Hide()
                 end
-            end)
-
-            btn._eabTooltipHooked = true
+                state.currentBtn = nil
+            end
+            return
         end
-    end
+
+        -- If Blizzard's native handler already set a button tooltip, track it
+        local nativeOwner = GameTooltip:GetOwner()
+        if nativeOwner and nativeOwner ~= state.currentBtn then
+            for j = 1, #buttons do
+                if nativeOwner == buttons[j] then
+                    state.currentBtn = nativeOwner
+                    return
+                end
+            end
+        end
+
+        -- Hit-test: find which button the cursor is over
+        local cx, cy = GetCursorPosition()
+        local scale = self:GetEffectiveScale()
+        cx, cy = cx / scale, cy / scale
+
+        local foundBtn = nil
+        for i = 1, #buttons do
+            local btn = buttons[i]
+            if btn and btn:IsShown() and btn:GetAlpha() > 0.01 then
+                local bl, bb, bw, bh = btn:GetRect()
+                if bl and cx >= bl and cx <= bl + bw and cy >= bb and cy <= bb + bh then
+                    foundBtn = btn
+                    break
+                end
+            end
+        end
+
+        if foundBtn then
+            -- Show or refresh tooltip when hovering a new button, or if
+            -- something else hid the tooltip while cursor stayed on the button
+            if foundBtn ~= state.currentBtn or GameTooltip:GetOwner() ~= foundBtn then
+                ShowTooltipForButton(foundBtn, info)
+                state.currentBtn = foundBtn
+            end
+        elseif state.currentBtn then
+            if GameTooltip:GetOwner() == state.currentBtn then
+                GameTooltip:Hide()
+            end
+            state.currentBtn = nil
+        end
+    end)
 end
 
 function EAB:RefreshMouseover()
