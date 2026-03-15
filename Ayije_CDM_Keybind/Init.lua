@@ -191,9 +191,13 @@ end)
 --  ASSIST TOGGLE CALLBACK
 -- =========================================================================
 -- Respond to assistEnabled changes so keybind text hides/shows immediately.
+-- NOTE: Must use a unique id (not "assist") because upstream Core/Keybinds.lua
+-- registers its own "assist" callback during Keybinds:Initialize(), which runs
+-- after our file loads. RegisterRefreshCallback uses the id as a dictionary key,
+-- so a duplicate id would overwrite whichever callback was registered first.
 
 if CDM.RegisterRefreshCallback then
-    CDM:RegisterRefreshCallback("assist", function()
+    CDM:RegisterRefreshCallback("keybindText", function()
         if CDM.RefreshAllKeybindTexts then
             CDM:RefreshAllKeybindTexts()
         end

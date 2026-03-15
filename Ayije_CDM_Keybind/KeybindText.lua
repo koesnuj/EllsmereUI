@@ -8,6 +8,9 @@ local GetFrameData = CDM.GetFrameData
 
 local VIEWERS = CDM_C.VIEWERS
 
+-- WoW 12.0 compat: HasAction was moved from global to C_ActionBar.HasAction
+local HasAction = HasAction or (C_ActionBar and C_ActionBar.HasAction)
+
 -- =========================================================================
 --  ACTION BAR DEFINITIONS (Bars 1-15, TWW compatible)
 -- =========================================================================
@@ -306,14 +309,18 @@ local function BuildKeybindCache()
                             elseif actionType == "item" and id then
                                 _itemCache[id] = _itemCache[id] or abbrev
                             elseif actionType == "macro" and id then
+                                local macroSpellID
                                 if GetMacroSpell then
-                                    local macroSpellID = GetMacroSpell(id)
-                                    if macroSpellID and not issecretvalue(macroSpellID)
-                                        and not _spellCache[macroSpellID] then
-                                        _spellCache[macroSpellID] = abbrev
-                                        for vid in pairs(CollectSpellVariants(macroSpellID)) do
-                                            _spellCache[vid] = _spellCache[vid] or abbrev
-                                        end
+                                    macroSpellID = GetMacroSpell(id)
+                                    -- WoW 12.0: GetMacroSpell may return spell name (string) in some contexts.
+                                    -- Discard non-numeric results; the C_ActionBar fallback below will catch these.
+                                    if type(macroSpellID) ~= "number" then macroSpellID = nil end
+                                end
+                                if macroSpellID and not issecretvalue(macroSpellID)
+                                    and not _spellCache[macroSpellID] then
+                                    _spellCache[macroSpellID] = abbrev
+                                    for vid in pairs(CollectSpellVariants(macroSpellID)) do
+                                        _spellCache[vid] = _spellCache[vid] or abbrev
                                     end
                                 end
                                 if GetMacroItem then
@@ -339,7 +346,10 @@ local function WipeKeybindCache()
     _itemCache  = nil
 end
 
--- Fast cache-based lookup (replaces the per-call full bar scan)
+-- Fast cache-based lookup with C_ActionBar fallback for macros.
+-- The primary cache is built by scanning action bar button frames.
+-- On cache miss (e.g. macros whose spell can't be resolved via GetMacroSpell),
+-- we fall back to C_ActionBar.FindSpellActionButtons which resolves macros internally.
 local function GetKeybindForSpellCached(spellID)
     if not spellID then return nil end
     -- Secret IDs can't be table keys; fall back to API scan
@@ -347,13 +357,50 @@ local function GetKeybindForSpellCached(spellID)
         return GetKeybindForSpell(spellID)
     end
     if not _spellCache then BuildKeybindCache() end
-    return _spellCache[spellID]
+    local cached = _spellCache[spellID]
+    if cached then return cached end
+
+    -- Cache miss fallback: try C_ActionBar API (resolves macros, all pages/forms)
+    if C_ActionBar and C_ActionBar.FindSpellActionButtons then
+        local variants = CollectSpellVariants(spellID)
+        for vid in pairs(variants) do
+            local ok, slots = pcall(C_ActionBar.FindSpellActionButtons, vid)
+            if ok and slots then
+                for _, slot in ipairs(slots) do
+                    local kb = SlotToKeybind(slot)
+                    if kb then
+                        _spellCache[spellID] = kb  -- cache for next lookup
+                        return kb
+                    end
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 local function GetKeybindForItemCached(itemID)
     if not itemID then return nil end
     if not _itemCache then BuildKeybindCache() end
-    return _itemCache[itemID]
+    local cached = _itemCache[itemID]
+    if cached then return cached end
+
+    -- Cache miss fallback: try C_ActionBar API
+    if C_ActionBar and C_ActionBar.FindItemActionButtons then
+        local ok, slots = pcall(C_ActionBar.FindItemActionButtons, itemID)
+        if ok and slots then
+            for _, slot in ipairs(slots) do
+                local kb = SlotToKeybind(slot)
+                if kb then
+                    _itemCache[itemID] = kb
+                    return kb
+                end
+            end
+        end
+    end
+
+    return nil
 end
 
 CDM.GetKeybindForSpell = GetKeybindForSpell
