@@ -1,6 +1,6 @@
 # EllesmereUI
 
-## [v3.8](https://github.com/EllesmereGaming/EllesmereUI/tree/v3.8) (2026-03-09)
-[Full Changelog](https://github.com/EllesmereGaming/EllesmereUI/compare/v3.7.5...v3.8) [Previous Releases](https://github.com/EllesmereGaming/EllesmereUI/releases)
+## [v4.8.4](https://github.com/EllesmereGaming/EllesmereUI/tree/v4.8.4) (2026-03-15)
+[Full Changelog](https://github.com/EllesmereGaming/EllesmereUI/compare/v4.8.3...v4.8.4) [Previous Releases](https://github.com/EllesmereGaming/EllesmereUI/releases)
 
-- Release v3.8  
+- Release v4.8.4  

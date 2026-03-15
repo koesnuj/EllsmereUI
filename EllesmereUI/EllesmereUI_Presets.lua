@@ -44,72 +44,124 @@ local CB_ACT_BRD_A = EllesmereUI.CB_ACT_BRD_A
 do
     -- All WoW Retail classes and their specs (as of TWW / 12.0)
     local SPEC_DATA = {
-        { class = "DEATHKNIGHT",  name = "Death Knight",  specs = {
-            { id = 250, name = "Blood" },
-            { id = 251, name = "Frost" },
-            { id = 252, name = "Unholy" },
-        }},
-        { class = "DEMONHUNTER",  name = "Demon Hunter",  specs = {
-            { id = 577, name = "Havoc" },
-            { id = 581, name = "Vengeance" },
-            { id = 1456, name = "Devourer" },
-        }},
-        { class = "DRUID",        name = "Druid",         specs = {
-            { id = 102, name = "Balance" },
-            { id = 103, name = "Feral" },
-            { id = 104, name = "Guardian" },
-            { id = 105, name = "Restoration" },
-        }},
-        { class = "EVOKER",       name = "Evoker",        specs = {
-            { id = 1467, name = "Devastation" },
-            { id = 1468, name = "Preservation" },
-            { id = 1473, name = "Augmentation" },
-        }},
-        { class = "HUNTER",       name = "Hunter",        specs = {
-            { id = 253, name = "Beast Mastery" },
-            { id = 254, name = "Marksmanship" },
-            { id = 255, name = "Survival" },
-        }},
-        { class = "MAGE",         name = "Mage",          specs = {
-            { id = 62,  name = "Arcane" },
-            { id = 63,  name = "Fire" },
-            { id = 64,  name = "Frost" },
-        }},
-        { class = "MONK",         name = "Monk",          specs = {
-            { id = 268, name = "Brewmaster" },
-            { id = 270, name = "Mistweaver" },
-            { id = 269, name = "Windwalker" },
-        }},
-        { class = "PALADIN",      name = "Paladin",       specs = {
-            { id = 65,  name = "Holy" },
-            { id = 66,  name = "Protection" },
-            { id = 70,  name = "Retribution" },
-        }},
-        { class = "PRIEST",       name = "Priest",        specs = {
-            { id = 256, name = "Discipline" },
-            { id = 257, name = "Holy" },
-            { id = 258, name = "Shadow" },
-        }},
-        { class = "ROGUE",        name = "Rogue",         specs = {
-            { id = 259, name = "Assassination" },
-            { id = 260, name = "Outlaw" },
-            { id = 261, name = "Subtlety" },
-        }},
-        { class = "SHAMAN",       name = "Shaman",        specs = {
-            { id = 262, name = "Elemental" },
-            { id = 263, name = "Enhancement" },
-            { id = 264, name = "Restoration" },
-        }},
-        { class = "WARLOCK",      name = "Warlock",       specs = {
-            { id = 265, name = "Affliction" },
-            { id = 266, name = "Demonology" },
-            { id = 267, name = "Destruction" },
-        }},
-        { class = "WARRIOR",      name = "Warrior",       specs = {
-            { id = 71,  name = "Arms" },
-            { id = 72,  name = "Fury" },
-            { id = 73,  name = "Protection" },
-        }},
+        {
+            class = "DEATHKNIGHT",
+            name = "Death Knight",
+            specs = {
+                { id = 250, name = "Blood" },
+                { id = 251, name = "Frost" },
+                { id = 252, name = "Unholy" },
+            }
+        },
+        {
+            class = "DEMONHUNTER",
+            name = "Demon Hunter",
+            specs = {
+                { id = 577,  name = "Havoc" },
+                { id = 581,  name = "Vengeance" },
+                { id = 1480, name = "Devourer" },
+            }
+        },
+        {
+            class = "DRUID",
+            name = "Druid",
+            specs = {
+                { id = 102, name = "Balance" },
+                { id = 103, name = "Feral" },
+                { id = 104, name = "Guardian" },
+                { id = 105, name = "Restoration" },
+            }
+        },
+        {
+            class = "EVOKER",
+            name = "Evoker",
+            specs = {
+                { id = 1467, name = "Devastation" },
+                { id = 1468, name = "Preservation" },
+                { id = 1473, name = "Augmentation" },
+            }
+        },
+        {
+            class = "HUNTER",
+            name = "Hunter",
+            specs = {
+                { id = 253, name = "Beast Mastery" },
+                { id = 254, name = "Marksmanship" },
+                { id = 255, name = "Survival" },
+            }
+        },
+        {
+            class = "MAGE",
+            name = "Mage",
+            specs = {
+                { id = 62, name = "Arcane" },
+                { id = 63, name = "Fire" },
+                { id = 64, name = "Frost" },
+            }
+        },
+        {
+            class = "MONK",
+            name = "Monk",
+            specs = {
+                { id = 268, name = "Brewmaster" },
+                { id = 270, name = "Mistweaver" },
+                { id = 269, name = "Windwalker" },
+            }
+        },
+        {
+            class = "PALADIN",
+            name = "Paladin",
+            specs = {
+                { id = 65, name = "Holy" },
+                { id = 66, name = "Protection" },
+                { id = 70, name = "Retribution" },
+            }
+        },
+        {
+            class = "PRIEST",
+            name = "Priest",
+            specs = {
+                { id = 256, name = "Discipline" },
+                { id = 257, name = "Holy" },
+                { id = 258, name = "Shadow" },
+            }
+        },
+        {
+            class = "ROGUE",
+            name = "Rogue",
+            specs = {
+                { id = 259, name = "Assassination" },
+                { id = 260, name = "Outlaw" },
+                { id = 261, name = "Subtlety" },
+            }
+        },
+        {
+            class = "SHAMAN",
+            name = "Shaman",
+            specs = {
+                { id = 262, name = "Elemental" },
+                { id = 263, name = "Enhancement" },
+                { id = 264, name = "Restoration" },
+            }
+        },
+        {
+            class = "WARLOCK",
+            name = "Warlock",
+            specs = {
+                { id = 265, name = "Affliction" },
+                { id = 266, name = "Demonology" },
+                { id = 267, name = "Destruction" },
+            }
+        },
+        {
+            class = "WARRIOR",
+            name = "Warrior",
+            specs = {
+                { id = 71, name = "Arms" },
+                { id = 72, name = "Fury" },
+                { id = 73, name = "Protection" },
+            }
+        },
     }
     EllesmereUI._SPEC_DATA = SPEC_DATA
 
@@ -420,27 +472,22 @@ do
             closeBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
             PP.Size(closeBtn, 200, 39)
             PP.Point(closeBtn, "BOTTOM", popup, "BOTTOM", 0, 38)
-            local closeBrd = closeBtn:CreateTexture(nil, "BACKGROUND")
-            closeBrd:SetAllPoints()
-            closeBrd:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
-            PP.DisablePixelSnap(closeBrd)
-            local closeFill = closeBtn:CreateTexture(nil, "BORDER")
-            PP.Point(closeFill, "TOPLEFT", closeBtn, "TOPLEFT", 1, -1)
-            PP.Point(closeFill, "BOTTOMRIGHT", closeBtn, "BOTTOMRIGHT", -1, 1)
-            closeFill:SetColorTexture(0.06, 0.08, 0.10, 0.92)
-            PP.DisablePixelSnap(closeFill)
+            local closeBg = closeBtn:CreateTexture(nil, "BACKGROUND")
+            closeBg:SetAllPoints()
+            closeBg:SetColorTexture(0.06, 0.08, 0.10, 0.92)
+            local closeBrd = MakeBorder(closeBtn, EG.r, EG.g, EG.b, 0.9, PP)
             local closeLbl = closeBtn:CreateFontString(nil, "OVERLAY")
             closeLbl:SetFont(FONT, 16, "")
-            closeLbl:SetPoint("CENTER")
+            PP.Point(closeLbl, "CENTER", closeBtn, "CENTER", 0, 0)
             closeLbl:SetText("Done")
             closeLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
             closeBtn:SetScript("OnEnter", function()
                 closeLbl:SetTextColor(EG.r, EG.g, EG.b, 1)
-                closeBrd:SetColorTexture(EG.r, EG.g, EG.b, 1)
+                closeBrd:SetColor(EG.r, EG.g, EG.b, 1)
             end)
             closeBtn:SetScript("OnLeave", function()
                 closeLbl:SetTextColor(EG.r, EG.g, EG.b, 0.9)
-                closeBrd:SetColorTexture(EG.r, EG.g, EG.b, 0.9)
+                closeBrd:SetColor(EG.r, EG.g, EG.b, 0.9)
             end)
             popup._closeBtn = closeBtn
 
@@ -574,12 +621,10 @@ do
                         local boxBg = box:CreateTexture(nil, "BACKGROUND")
                         boxBg:SetAllPoints()
                         boxBg:SetColorTexture(CB_BOX_R, CB_BOX_G, CB_BOX_B, 1)
-                        PP.DisablePixelSnap(boxBg)
                         row._boxBg = boxBg
                         local boxBorder = MakeBorder(box, BORDER_R, BORDER_G, BORDER_B, CB_BRD_A, PP)
                         row._boxBorder = boxBorder
                         local check = box:CreateTexture(nil, "ARTWORK")
-                        PP.DisablePixelSnap(check)
                         PP.Point(check, "TOPLEFT", box, "TOPLEFT", CHECK_INSET, -CHECK_INSET)
                         PP.Point(check, "BOTTOMRIGHT", box, "BOTTOMRIGHT", -CHECK_INSET, CHECK_INSET)
                         check:SetColorTexture(ELLESMERE_GREEN.r, ELLESMERE_GREEN.g, ELLESMERE_GREEN.b, 1)

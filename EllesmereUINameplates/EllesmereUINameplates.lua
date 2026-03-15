@@ -5,7 +5,6 @@ local PP = EllesmereUI.PP
 local UnitHealth, UnitHealthMax = UnitHealth, UnitHealthMax
 local UnitGetTotalAbsorbs = UnitGetTotalAbsorbs
 local C_UnitAuras = C_UnitAuras
-local CooldownFrame_Clear = CooldownFrame_Clear
 local UnitName, UnitGUID = UnitName, UnitGUID
 local UnitIsUnit, UnitCanAttack = UnitIsUnit, UnitCanAttack
 local UnitIsEnemy, UnitIsTapDenied = UnitIsEnemy, UnitIsTapDenied
@@ -48,6 +47,15 @@ ns.GetNPUseShadow = GetNPUseShadow
 ns.SetFSFont = SetFSFont
 ns.plates = {}
 _G.EllesmereNameplates_NS = ns
+
+-- Constant table for health text bar slots (hoisted to file scope to avoid
+-- per-call allocation inside UpdateHealthValues).
+local HP_BAR_SLOTS = {
+    { key = "textSlotRight",  anchor = "RIGHT",  point = "RIGHT",  xOff = -2 },
+    { key = "textSlotLeft",   anchor = "LEFT",   point = "LEFT",   xOff = 4 },
+    { key = "textSlotCenter", anchor = "CENTER", point = "CENTER", xOff = 0 },
+}
+
 local defaults = {
     hostile = { r = 0.39, g = 0.11, b = 0.09 },
     neutral = { r = 0.81, g = 0.72, b = 0.19 },
@@ -62,6 +70,7 @@ local defaults = {
     enemyInCombat = { r = 0.800, g = 0.137, b = 0.137 },
     tankHasAggro = { r = 0.05, g = 0.82, b = 0.62 },
     tankHasAggroEnabled = false,
+    classicTankAggro = false,
     tankLosingAggro = { r = 0.81, g = 0.72, b = 0.19 },
     tankNoAggro = { r = 1.00, g = 0.22, b = 0.17 },
     dpsNearAggro = { r = 0.81, g = 0.72, b = 0.19 },
@@ -103,7 +112,10 @@ local defaults = {
     classPowerGap = 2,
     healthBarWidth = 6,
     nameplateOverlapV = 1.05,
-    stackSpacingScale = 100,
+    stackSpacingScale = 50,
+    stackingEnabled = true,
+    hitboxScaleX = 100,
+    hitboxScaleY = 100,
     nameplateYOffset = 0,
     enemyNameTextSize = 11,
     enemyNameColor = { r = 1, g = 1, b = 1 },
@@ -245,13 +257,6 @@ local function ApplyHealthBarTexture(plate)
     else
         health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     end
-    local ft = health:GetStatusBarTexture()
-    if ft then
-        local PP = EllesmereUI and EllesmereUI.PP
-        if PP then PP.DisablePixelSnap(ft) else
-            if ft.SetSnapToPixelGrid then ft:SetSnapToPixelGrid(false); ft:SetTexelSnappingBias(0) end
-        end
-    end
 end
 ns.ApplyHealthBarTexture = ApplyHealthBarTexture
 
@@ -324,7 +329,7 @@ local function GetPandemicGlowStyle()
     local db = EllesmereUINameplatesDB
     local raw = db and db.pandemicGlowStyle
     if raw == nil then return defaults.pandemicGlowStyle end
-    -- One-time legacy migration: old string keys or old numeric indices â†’ new order
+    -- One-time legacy migration: old string keys or old numeric indices new order
     -- The flag _pandemicGlowMigrated prevents re-migration after the user picks a new value
     if not db._pandemicGlowMigrated then
         local migrated
@@ -481,6 +486,17 @@ local function GetHealthBarWidth()
     return BAR_W + extra
 end
 ns.GetHealthBarWidth = GetHealthBarWidth
+
+-- Returns the Y offset to apply to plate content when hitbox Y scale != 100%.
+-- SetNamePlateSize grows/shrinks the frame from its base anchor, so we shift
+-- content to keep the visual bar in the same screen position.
+local function GetHitboxYShift()
+    local db = EllesmereUINameplatesDB or defaults
+    local sy = (db.hitboxScaleY or 100) / 100
+    if sy == 1 then return 0 end
+    return -((GetHealthBarHeight() * sy) - GetHealthBarHeight()) / 2
+end
+ns.GetHitboxYShift = GetHitboxYShift
 -- Slot-based size/offset getters
 local function GetSlotSize(posKey)
     local db = EllesmereUINameplatesDB
@@ -607,7 +623,7 @@ ns.GetAuraSlots = GetAuraSlots
 -- Externally-needed items are stored on ns.
 do
 -- Pandemic curve: step function returns 1 when remaining% <= 30% (pandemic window), 0 otherwise
--- Secret values from duration objects are passed ONLY to Blizzard widget APIs (SetAlpha) â€” never compared in Lua
+-- Secret values from duration objects are passed ONLY to Blizzard widget APIs (SetAlpha) never compared in Lua
 local pandemicCurve
 if C_CurveUtil and C_CurveUtil.CreateCurve then
     pandemicCurve = C_CurveUtil.CreateCurve()
@@ -618,7 +634,7 @@ end
 ns.pandemicCurve = pandemicCurve
 
 -------------------------------------------------------------------------------
---  Glow Engines â€” provided by shared EllesmereUI_Glows.lua
+--  Glow Engines provided by shared EllesmereUI_Glows.lua
 --  Local aliases for the pandemic glow wrapper below.
 -------------------------------------------------------------------------------
 local _G_Glows = EllesmereUI.Glows
@@ -758,7 +774,7 @@ local function ApplyPandemicGlow(slot)
         return
     end
     StartPandemicGlow(slot, GetDebuffIconSize())
-    -- Secret boolean/number â†’ EvaluateColorValueFromBoolean â†’ SetAlpha (all Blizzard APIs, no Lua comparisons)
+    -- Secret boolean/number EvaluateColorValueFromBoolean SetAlpha (all Blizzard APIs, no Lua comparisons)
     slot.pandemicGlow.wrapper:SetAlpha(C_CurveUtil.EvaluateColorValueFromBoolean(durObj:IsZero(), 0, durObj:EvaluateRemainingPercent(pandemicCurve)))
     -- Register for alpha-only tick updates
     activePandemicSlots[slot] = true
@@ -966,35 +982,65 @@ local function PositionArrowsOutsideAuras(plate)
 end
 ns.PositionArrowsOutsideAuras = PositionArrowsOutsideAuras
 
-local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(plate)
-    plate:SetFlattensRenderLayers(true)
-    plate.health = CreateFrame("StatusBar", nil, plate)
-    plate.health:SetFrameLevel(10)  
-    plate.health:SetPoint("CENTER", plate, "CENTER", 0, GetNameplateYOffset())
-    plate.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
-    plate.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-    plate.health:SetClipsChildren(true)
-    do local PP = EllesmereUI and EllesmereUI.PP
-        if PP then PP.DisablePixelSnap(plate.health) end
+-------------------------------------------------------------------------------
+--  Lazy-creation helpers for target-only / focus-only UI objects.
+--  These are only needed on 1 plate at a time, so creating them on every
+--  pooled plate wastes memory. Each Ensure* is idempotent (no-ops if
+--  already created on the plate).
+-------------------------------------------------------------------------------
+local GLOW_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\background.png"
+local GLOW_MARGIN = 0.48
+local GLOW_CORNER = 12
+local GLOW_EXTEND = 6
+
+local function EnsureGlow(plate)
+    if plate.glow then return end
+    plate.glowFrame = CreateFrame("Frame", nil, plate)
+    plate.glowFrame:SetFrameStrata("BACKGROUND")
+    plate.glowFrame:SetFrameLevel(1)
+    plate.glowFrame:SetPoint("TOPLEFT", plate.health, "TOPLEFT", -GLOW_EXTEND, GLOW_EXTEND)
+    plate.glowFrame:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", GLOW_EXTEND, -GLOW_EXTEND)
+    local function MkTex()
+        local t = plate.glowFrame:CreateTexture(nil, "BACKGROUND")
+        t:SetTexture(GLOW_TEX)
+        t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
+        t:SetBlendMode("ADD")
+        return t
     end
-    plate.healthBG = plate.health:CreateTexture(nil, "BACKGROUND")
-    plate.healthBG:SetAllPoints()
-    plate.healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)
-    -- Hash line: thin vertical marker at a configurable health percentage
-    plate.hashLine = plate.health:CreateTexture(nil, "OVERLAY", nil, 3)
-    plate.hashLine:SetColorTexture(1, 1, 1, 0.8)
-    plate.hashLine:SetWidth(2)
-    plate.hashLine:SetPoint("TOP", plate.health, "TOP", 0, 0)
-    plate.hashLine:SetPoint("BOTTOM", plate.health, "BOTTOM", 0, 0)
-    plate.hashLine:Hide()
-    -- Focus target overlay: two non-overlapping textures at the same fixed scale
-    -- Fill overlay: full alpha, clipped to the fill region via a child frame
-    -- Bg overlay: half alpha, covers only the empty region (fill right edge to bar right edge)
+    plate.glowTL = MkTex(); plate.glowTL:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowTL:SetPoint("TOPLEFT"); plate.glowTL:SetTexCoord(0, GLOW_MARGIN, 0, GLOW_MARGIN)
+    plate.glowTR = MkTex(); plate.glowTR:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowTR:SetPoint("TOPRIGHT"); plate.glowTR:SetTexCoord(1 - GLOW_MARGIN, 1, 0, GLOW_MARGIN)
+    plate.glowBL = MkTex(); plate.glowBL:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowBL:SetPoint("BOTTOMLEFT"); plate.glowBL:SetTexCoord(0, GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
+    plate.glowBR = MkTex(); plate.glowBR:SetSize(GLOW_CORNER, GLOW_CORNER); plate.glowBR:SetPoint("BOTTOMRIGHT"); plate.glowBR:SetTexCoord(1 - GLOW_MARGIN, 1, 1 - GLOW_MARGIN, 1)
+    plate.glowTop = MkTex(); plate.glowTop:SetHeight(GLOW_CORNER); plate.glowTop:SetPoint("TOPLEFT", plate.glowTL, "TOPRIGHT"); plate.glowTop:SetPoint("TOPRIGHT", plate.glowTR, "TOPLEFT"); plate.glowTop:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 0, GLOW_MARGIN)
+    plate.glowBottom = MkTex(); plate.glowBottom:SetHeight(GLOW_CORNER); plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT"); plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT"); plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
+    plate.glowLeft = MkTex(); plate.glowLeft:SetWidth(GLOW_CORNER); plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT"); plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT"); plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    plate.glowRight = MkTex(); plate.glowRight:SetWidth(GLOW_CORNER); plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT"); plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT"); plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
+    plate.glow = plate.glowFrame
+    plate.glowFrame:Hide()
+end
+
+local function EnsureArrows(plate)
+    if plate.leftArrow then return end
+    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
+    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
+    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
+    local sc = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.targetArrowScale) or 1.0
+    local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
+    PP.Size(plate.leftArrow, aw, ah)
+    PP.Point(plate.leftArrow, "RIGHT", plate.health, "LEFT", -8, 0)
+    plate.leftArrow:Hide()
+    PP.Size(plate.rightArrow, aw, ah)
+    PP.Point(plate.rightArrow, "LEFT", plate.health, "RIGHT", 8, 0)
+    plate.rightArrow:Hide()
+end
+
+local function EnsureFocusOverlay(plate)
+    if plate.focusClipFill then return end
     local overlayAlpha = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayAlpha) or defaults.focusOverlayAlpha
     local overlayColor = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.focusOverlayColor) or defaults.focusOverlayColor
     local STRIPE_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\striped-v2.png"
     local fillTex = plate.health:GetStatusBarTexture()
-    -- Fill overlay: clip frame sized to the fill texture, contains a fixed-size stripe texture
     plate.focusClipFill = CreateFrame("Frame", nil, plate.health)
     plate.focusClipFill:SetClipsChildren(true)
     plate.focusClipFill:SetPoint("TOPLEFT", fillTex, "TOPLEFT", 0, -1)
@@ -1007,7 +1053,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.focusOverlayFill:SetAlpha(overlayAlpha)
     plate.focusOverlayFill:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
     plate.focusClipFill:Hide()
-    -- Bg overlay: clip frame covering only the empty region, contains a fixed-size stripe texture
     plate.focusClipBg = CreateFrame("Frame", nil, plate.health)
     plate.focusClipBg:SetClipsChildren(true)
     plate.focusClipBg:SetPoint("TOPLEFT", fillTex, "TOPRIGHT", 0, -1)
@@ -1020,6 +1065,26 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
     plate.focusOverlayBg:SetVertexColor(overlayColor.r, overlayColor.g, overlayColor.b)
     plate.focusClipBg:Hide()
+end
+
+local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(plate)
+    plate:SetFlattensRenderLayers(true)
+    plate.health = CreateFrame("StatusBar", nil, plate)
+    plate.health:SetFrameLevel(10)  
+    plate.health:SetPoint("CENTER", plate, "CENTER", 0, GetNameplateYOffset())
+    plate.health:SetSize(GetHealthBarWidth(), GetHealthBarHeight())
+    plate.health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+    plate.health:SetClipsChildren(false)
+    plate.healthBG = plate.health:CreateTexture(nil, "BACKGROUND")
+    plate.healthBG:SetAllPoints()
+    plate.healthBG:SetColorTexture(0.12, 0.12, 0.12, 1.0)
+    -- Hash line: thin vertical marker at a configurable health percentage
+    plate.hashLine = plate.health:CreateTexture(nil, "OVERLAY", nil, 3)
+    plate.hashLine:SetColorTexture(1, 1, 1, 0.8)
+    plate.hashLine:SetWidth(2)
+    plate.hashLine:SetPoint("TOP", plate.health, "TOP", 0, 0)
+    plate.hashLine:SetPoint("BOTTOM", plate.health, "BOTTOM", 0, 0)
+    plate.hashLine:Hide()
     plate.absorb = CreateFrame("StatusBar", nil, plate.health)
     plate.absorb:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
     plate.absorb:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
@@ -1030,9 +1095,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.absorb:SetWidth(GetHealthBarWidth())
     plate.absorb:SetHeight(GetHealthBarHeight())
     plate.absorb:SetFrameLevel(plate.health:GetFrameLevel())
-    do local PP = EllesmereUI and EllesmereUI.PP
-        if PP then PP.DisablePixelSnap(plate.absorb) end
-    end
     plate.absorbOverflow = CreateFrame("StatusBar", nil, plate.health)
     plate.absorbOverflow:SetStatusBarTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\absorb-default.png")
     plate.absorbOverflow:GetStatusBarTexture():SetDrawLayer("ARTWORK", 1)
@@ -1067,7 +1129,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     local BORDER_CORNER = 6
 
     local function CreateBorderSet(parent, tex, color)
-        local PP = EllesmereUI and EllesmereUI.PP
         local f = CreateFrame("Frame", nil, parent)
         f:SetFrameLevel(parent:GetFrameLevel() + 5)
         f:SetAllPoints()
@@ -1076,7 +1137,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
             local t = f:CreateTexture(nil, "OVERLAY", nil, 7)
             t:SetTexture(tex)
             t:SetVertexColor(color.r, color.g, color.b)
-            if PP then PP.DisablePixelSnap(t) end
             f._texs[#f._texs + 1] = t
             return t
         end
@@ -1115,62 +1175,11 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
         for _, tex in ipairs(plate._simpleBorderFrame._texs) do tex:SetVertexColor(cr, cg, cb) end
     end
     plate:ApplyBorderStyle()
-    local GLOW_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\background.png"
-    local GLOW_MARGIN = 0.48
-    local GLOW_CORNER = 12
-    local GLOW_EXTEND = 6
-    plate.glowFrame = CreateFrame("Frame", nil, plate)  
-    plate.glowFrame:SetFrameStrata("BACKGROUND")
-    plate.glowFrame:SetFrameLevel(1)  
-    plate.glowFrame:SetPoint("TOPLEFT", plate.health, "TOPLEFT", -GLOW_EXTEND, GLOW_EXTEND)
-    plate.glowFrame:SetPoint("BOTTOMRIGHT", plate.health, "BOTTOMRIGHT", GLOW_EXTEND, -GLOW_EXTEND)
-    local function CreateGlowTex()
-        local t = plate.glowFrame:CreateTexture(nil, "BACKGROUND")
-        t:SetTexture(GLOW_TEX)
-        t:SetVertexColor(0.4117, 0.6667, 1.0, 1.0)
-        t:SetBlendMode("ADD")
-        return t
-    end
-    plate.glowTL = CreateGlowTex()
-    plate.glowTL:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowTL:SetPoint("TOPLEFT")
-    plate.glowTL:SetTexCoord(0, GLOW_MARGIN, 0, GLOW_MARGIN)
-    plate.glowTR = CreateGlowTex()
-    plate.glowTR:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowTR:SetPoint("TOPRIGHT")
-    plate.glowTR:SetTexCoord(1 - GLOW_MARGIN, 1, 0, GLOW_MARGIN)
-    plate.glowBL = CreateGlowTex()
-    plate.glowBL:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowBL:SetPoint("BOTTOMLEFT")
-    plate.glowBL:SetTexCoord(0, GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
-    plate.glowBR = CreateGlowTex()
-    plate.glowBR:SetSize(GLOW_CORNER, GLOW_CORNER)
-    plate.glowBR:SetPoint("BOTTOMRIGHT")
-    plate.glowBR:SetTexCoord(1 - GLOW_MARGIN, 1, 1 - GLOW_MARGIN, 1)
-    plate.glowTop = CreateGlowTex()
-    plate.glowTop:SetHeight(GLOW_CORNER)
-    plate.glowTop:SetPoint("TOPLEFT", plate.glowTL, "TOPRIGHT")
-    plate.glowTop:SetPoint("TOPRIGHT", plate.glowTR, "TOPLEFT")
-    plate.glowTop:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 0, GLOW_MARGIN)
-    plate.glowBottom = CreateGlowTex()
-    plate.glowBottom:SetHeight(GLOW_CORNER)
-    plate.glowBottom:SetPoint("BOTTOMLEFT", plate.glowBL, "BOTTOMRIGHT")
-    plate.glowBottom:SetPoint("BOTTOMRIGHT", plate.glowBR, "BOTTOMLEFT")
-    plate.glowBottom:SetTexCoord(GLOW_MARGIN, 1 - GLOW_MARGIN, 1 - GLOW_MARGIN, 1)
-    plate.glowLeft = CreateGlowTex()
-    plate.glowLeft:SetWidth(GLOW_CORNER)
-    plate.glowLeft:SetPoint("TOPLEFT", plate.glowTL, "BOTTOMLEFT")
-    plate.glowLeft:SetPoint("BOTTOMLEFT", plate.glowBL, "TOPLEFT")
-    plate.glowLeft:SetTexCoord(0, GLOW_MARGIN, GLOW_MARGIN, 1 - GLOW_MARGIN)
-    plate.glowRight = CreateGlowTex()
-    plate.glowRight:SetWidth(GLOW_CORNER)
-    plate.glowRight:SetPoint("TOPRIGHT", plate.glowTR, "BOTTOMRIGHT")
-    plate.glowRight:SetPoint("BOTTOMRIGHT", plate.glowBR, "TOPRIGHT")
-    plate.glowRight:SetTexCoord(1 - GLOW_MARGIN, 1, GLOW_MARGIN, 1 - GLOW_MARGIN)
-    plate.glow = plate.glowFrame
-    plate.glowFrame:Hide()  
+    -- Target glow, target arrows, and focus overlay are lazy-created on
+    -- demand (EnsureGlow / EnsureArrows / EnsureFocusOverlay) since only
+    -- 1 plate at a time ever shows them. This saves ~14 objects per plate.
     -- Text overlay frame: renders above focus stripe overlay (level +1)
-    plate.healthTextFrame = CreateFrame("Frame", nil, plate.health)
+    plate.healthTextFrame = CreateFrame("Frame", nil, plate)
     plate.healthTextFrame:SetAllPoints(plate.health)
     plate.healthTextFrame:SetFrameLevel(plate.health:GetFrameLevel() + 2)
     plate.hpText = plate.healthTextFrame:CreateFontString(nil, "OVERLAY")
@@ -1194,20 +1203,6 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     PP.Width(plate.name, math.max(GetHealthBarWidth(), 20))
     plate.name:SetWordWrap(false)
     plate.name:SetMaxLines(1)
-    plate.leftArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.leftArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_left.png")
-    plate.rightArrow = plate:CreateTexture(nil, "OVERLAY")
-    plate.rightArrow:SetTexture("Interface\\AddOns\\EllesmereUINameplates\\Media\\arrow_right.png")
-    do
-        local sc = (EllesmereUINameplatesDB and EllesmereUINameplatesDB.targetArrowScale) or 1.0
-        local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
-        PP.Size(plate.leftArrow,  aw, ah)
-        PP.Point(plate.leftArrow,  "RIGHT", plate.health, "LEFT",  -8, 0)
-        plate.leftArrow:Hide()
-        PP.Size(plate.rightArrow, aw, ah)
-        PP.Point(plate.rightArrow, "LEFT",  plate.health, "RIGHT",  8, 0)
-        plate.rightArrow:Hide()
-    end
     plate.raidFrame = CreateFrame("Frame", nil, plate)
     local rmSize = GetRaidMarkerSize()
     PP.Size(plate.raidFrame, rmSize, rmSize)
@@ -1231,17 +1226,11 @@ local frameCache = CreateFramePool("Frame", UIParent, nil, nil, false, function(
     plate.cast:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
     plate.cast:SetMinMaxValues(0, 1)
     plate.cast:Hide()
-    do local PP = EllesmereUI and EllesmereUI.PP
-        if PP then PP.DisablePixelSnap(plate.cast) end
-    end
     plate.castBG = plate.cast:CreateTexture(nil, "BACKGROUND")
     plate.castBG:SetAllPoints()
     plate.castBG:SetColorTexture(0.1, 0.1, 0.1, 0.9)
     plate.castLeftBorder = plate.cast:CreateTexture(nil, "OVERLAY", nil, 7)
     plate.castLeftBorder:SetColorTexture(0, 0, 0, 1)
-    do local PP = EllesmereUI and EllesmereUI.PP
-        if PP then PP.DisablePixelSnap(plate.castLeftBorder) end
-    end
     plate.castLeftBorder:SetWidth(1)
     plate.castLeftBorder:SetPoint("TOPLEFT", plate.cast, "TOPLEFT", 0, 0)
     plate.castLeftBorder:SetPoint("BOTTOMLEFT", plate.cast, "BOTTOMLEFT", 0, 0)
@@ -1455,25 +1444,25 @@ local function InitDB()
         EllesmereUINameplatesDB.debuffIconW = nil
         EllesmereUINameplatesDB.debuffIconH = nil
     end
-    -- Migrate debuffTextPosition â†’ auraTextPosition (timer position now applies to all auras)
+    -- Migrate debuffTextPosition auraTextPosition (timer position now applies to all auras)
     if EllesmereUINameplatesDB.debuffTextPosition and not EllesmereUINameplatesDB.auraTextPosition then
         EllesmereUINameplatesDB.auraTextPosition = EllesmereUINameplatesDB.debuffTextPosition
     end
-    -- Migrate unified auraTextPosition â†’ per-type timer positions
+    -- Migrate unified auraTextPosition per-type timer positions
     if EllesmereUINameplatesDB.auraTextPosition and not EllesmereUINameplatesDB.debuffTimerPosition then
         local pos = EllesmereUINameplatesDB.auraTextPosition
         EllesmereUINameplatesDB.debuffTimerPosition = pos
         EllesmereUINameplatesDB.buffTimerPosition = pos
         EllesmereUINameplatesDB.ccTimerPosition = pos
     end
-    -- Migrate old per-type text color â†’ unified auraDurationTextColor
+    -- Migrate old per-type text color unified auraDurationTextColor
     if not EllesmereUINameplatesDB.auraDurationTextColor then
         if EllesmereUINameplatesDB.debuffTimerColor then
             local c = EllesmereUINameplatesDB.debuffTimerColor
             EllesmereUINameplatesDB.auraDurationTextColor = { r = c.r, g = c.g, b = c.b }
         end
     end
-    -- Migrate showHealthNumber toggle â†’ hpNumberPos dropdown
+    -- Migrate showHealthNumber toggle hpNumberPos dropdown
     if EllesmereUINameplatesDB.showHealthNumber ~= nil and not EllesmereUINameplatesDB.hpNumberPos then
         if EllesmereUINameplatesDB.showHealthNumber then
             EllesmereUINameplatesDB.hpNumberPos = "center"
@@ -1481,7 +1470,7 @@ local function InitDB()
             EllesmereUINameplatesDB.hpNumberPos = "none"
         end
     end
-    -- Migrate old text position keys â†’ new slot-based system
+    -- Migrate old text position keys new slot-based system
     if EllesmereUINameplatesDB.textSlotTop == nil
        and (EllesmereUINameplatesDB.enemyNamePos ~= nil
          or EllesmereUINameplatesDB.hpPercentPos ~= nil
@@ -1520,7 +1509,7 @@ local function InitDB()
         db.hpPercentPos = nil
         db.hpNumberPos = nil
     end
-    -- Migrate old global text colors â†’ per-slot colors
+    -- Migrate old global text colors per-slot colors
     if EllesmereUINameplatesDB.textSlotTopColor == nil then
         local db = EllesmereUINameplatesDB
         local oldNameC = db.enemyNameColor or defaults.enemyNameColor
@@ -1624,7 +1613,44 @@ function ns.RefreshStackingBounds()
     end
 end
 
---- Full visual refresh for all plates â€” called when an entire preset is applied.
+function ns.RefreshStackingMotion()
+    if not C_CVar or not C_CVar.SetCVarBitfield then return end
+    local db = EllesmereUINameplatesDB or defaults
+    local enabled = (db.stackingEnabled ~= false)
+    -- Enemy stacking follows our toggle. Friendly stacking is always forced
+    -- off so Blizzard's "Stack Nameplates: Friendly Units" setting has no effect.
+    if Enum and Enum.NamePlateStackType then
+        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Enemy, enabled)
+        C_CVar.SetCVarBitfield("nameplateStackingTypes", Enum.NamePlateStackType.Friendly, false)
+    end
+end
+
+function ns.RefreshHitboxSize()
+    if InCombatLockdown() then return end
+    if not C_NamePlate or not C_NamePlate.SetNamePlateSize then return end
+    local db = EllesmereUINameplatesDB or defaults
+    local sx = (db.hitboxScaleX or 100) / 100
+    local sy = (db.hitboxScaleY or 100) / 100
+    local baseW = GetHealthBarWidth()
+    local baseH = GetHealthBarHeight()
+    local newH  = baseH * sy
+    C_NamePlate.SetNamePlateSize(baseW * sx, newH)
+    -- The frame grows upward from its base, so the extra height is all on top.
+    -- Shift the hit area down by half the extra so it's centered on the bar.
+    if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets
+       and Enum and Enum.NamePlateType then
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+        C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
+    end
+    -- Shift plate content to compensate for the upward frame growth
+    local yShift = GetHitboxYShift()
+    for _, plate in pairs(ns.plates) do
+        plate:ClearAllPoints()
+        plate:SetPoint("CENTER", plate.nameplate, "CENTER", 0, yShift)
+    end
+end
+
+--- Full visual refresh for all plates called when an entire preset is applied.
 --- Re-runs SetUnit on each active plate, which re-reads all DB values and applies
 --- them.  Only runs on deliberate preset switch (not per-frame or per-event).
 function ns.RefreshAllSettings()
@@ -1737,7 +1763,6 @@ local function SetupAuraCVars()
         local showDefaultNames = (db.friendlyShowDefaultNames == true)
         SetCVar("nameplateShowOnlyNameForFriendlyPlayerUnits", nameOnly and 1 or 0)
         SetCVar("nameplateShowFriendlyPlayers", showPlayers and 1 or 0)
-        SetCVar("nameplateShowFriendlyPlayerUnits", showPlayers and 1 or 0)
         SetCVar("UnitNameFriendlyPlayerName", (showPlayers or showDefaultNames) and 1 or 0)
         SetCVar("nameplateShowFriends", showPlayers and 1 or 0)
         SetCVar("nameplateShowFriendlyNPCs", showNPCs and 1 or 0)
@@ -1747,40 +1772,34 @@ local function SetupAuraCVars()
         SetCVar("ShowClassColorInNameplate", 1)
         SetCVar("nameplateSize", 3)
         SetCVar("nameplateShowAll", 1)
-        SetCVar("nameplatePlayerLargerScale", 1)
-        SetCVar("nameplateLargerScale", 1)
-        SetCVar("nameplateTargetRadialPosition", 1)
         SetCVar("nameplateMinScale", 1)
         SetCVar("nameplateOverlapH", 1)
         SetCVar("nameplateOverlapV", EllesmereUINameplatesDB and EllesmereUINameplatesDB.nameplateOverlapV or defaults.nameplateOverlapV)
-        SetCVar("nameplateGlobalScale", 1)
-        SetCVar("NamePlateHorizontalScale", 1)
-        SetCVar("NamePlateVerticalScale", 1)
-        SetCVar("nameplateLargeBottomInset", 0.15)
         SetCVar("nameplateMaxAlpha", 1)
         SetCVar("nameplateMaxAlphaDistance", 40)
         SetCVar("nameplateMinAlpha", 0.6)
         SetCVar("nameplateMinAlphaDistance", -100000)
         SetCVar("nameplateMaxDistance", 60)
         SetCVar("nameplateMaxScale", 1)
-        SetCVar("nameplateMotionSpeed", 0.025)
         SetCVar("nameplateTargetBehindMaxDistance", 30)
         SetCVar("clampTargetNameplateToScreen", 1)
         SetCVar("nameplateUseClassColorForFriendlyPlayerUnitNames", (db.classColorFriendly ~= false) and 1 or 0)
     end
+    -- Apply stacking state via the Midnight bitfield CVar
+    ns.RefreshStackingMotion()
     local function ApplyNamePlateClickArea()
         if InCombatLockdown() then return end
+        local db = EllesmereUINameplatesDB or defaults
+        local sx = (db.hitboxScaleX or 100) / 100
+        local sy = (db.hitboxScaleY or 100) / 100
+        local baseH = GetHealthBarHeight()
+        local newH  = baseH * sy
         if C_NamePlate and C_NamePlate.SetNamePlateSize then
-            -- Size must cover the full visual footprint (name + health + cast)
-            -- to prevent stacking jitter. Health bar alone is too small.
-            local barH = GetHealthBarHeight()
-            local castH = GetCastBarHeight()
-            local nameGap = 4 + GetEnemyNameTextSize()
-            local totalH = nameGap + barH + castH
-            C_NamePlate.SetNamePlateSize(GetHealthBarWidth(), totalH)
+            C_NamePlate.SetNamePlateSize(GetHealthBarWidth() * sx, newH)
         end
         if C_NamePlateManager and C_NamePlateManager.SetNamePlateHitTestInsets and Enum and Enum.NamePlateType then
             C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Enemy, -10000, -10000, -10000, -10000)
+            C_NamePlateManager.SetNamePlateHitTestInsets(Enum.NamePlateType.Friendly, -10000, -10000, -10000, -10000)
         end
     end
     ApplyNamePlateClickArea()
@@ -1808,13 +1827,18 @@ local function SetupAuraCVars()
             end)
         end
         -- Hook OnNamePlateAdded to suppress Blizzard UnitFrame as early as
-        -- possible â€” before our NAME_PLATE_UNIT_ADDED fires.  This prevents
+        -- possible before our NAME_PLATE_UNIT_ADDED fires.  This prevents
         -- the initial layout pass from affecting nameplate bounds.
         hooksecurefunc(NamePlateDriverFrame, "OnNamePlateAdded", function(_, addedUnit)
             if addedUnit == "preview" then return end
             local np = C_NamePlate.GetNamePlateForUnit(addedUnit)
             if np and addedUnit and UnitCanAttack("player", addedUnit) then
                 ns.HideBlizzardFrame(np, addedUnit)
+                -- Keep Blizzard's UnitFrame processing UNIT_AURA so its
+                -- debuffList/buffList stay current for our importance filter
+                if np.UnitFrame then
+                    np.UnitFrame:RegisterUnitEvent("UNIT_AURA", addedUnit)
+                end
             end
         end)
     end
@@ -1848,7 +1872,7 @@ local CP_CLASS_COLORS = {
 }
 local CP_DEFAULT_COLOR = { 1.00, 0.84, 0.30 }  -- fallback gold
 
--- Map class â†’ { powerType, maxPips (fallback) }
+-- Map class { powerType, maxPips (fallback) }
 -- Entries can be a simple table { type, max } or a spec-keyed table { [specID] = { type, max } }
 local CLASS_POWER_MAP = {
     ROGUE       = { Enum.PowerType.ComboPoints, 5 },
@@ -1862,7 +1886,9 @@ local CLASS_POWER_MAP = {
     DEMONHUNTER = { [581] = { "SOUL_FRAGMENTS_VENGEANCE", 6 } },  -- Vengeance only (secret value)
     SHAMAN      = { [263] = { "MAELSTROM_WEAPON", 10 } },  -- Enhancement only
     PRIEST      = { [258] = { "INSANITY_BAR", 100 } },     -- Shadow only
-    HUNTER      = { [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
+    HUNTER      = { [253] = { "FOCUS_BAR", 100 },
+                    [254] = { "FOCUS_BAR", 100 },
+                    [255] = { "TIP_OF_THE_SPEAR", 3 } },   -- Survival only
     WARRIOR     = { [72]  = { "WHIRLWIND_STACKS", 4 } },    -- Fury only
 }
 
@@ -2010,6 +2036,42 @@ local function UpdateClassPowerOnPlate(plate)
         bar:SetPoint(anchorPoint, anchorFrame, anchorRelPoint,
             cpXOff, yDir * cpYOff)
         bar:SetMinMaxValues(0, maxI)
+        bar:SetValue(cur)
+
+        local _, pClass = UnitClass("player")
+        local cpColor = CP_CLASS_COLORS[pClass] or CP_DEFAULT_COLOR
+        if not GetClassPowerClassColors() then
+            local cc = GetClassPowerCustomColor()
+            cpColor = { cc.r, cc.g, cc.b }
+        end
+        bar:SetStatusBarColor(cpColor[1], cpColor[2], cpColor[3], 1)
+
+        bar._bg:SetColorTexture(bgCol.r, bgCol.g, bgCol.b, bgCol.a)
+        bar:Show()
+        return
+    end
+
+    -- Bar-type resource (Hunter Focus for BM/MM): single StatusBar
+    if classPowerType == "FOCUS_BAR" then
+        for i = 1, #plate._cpPips do
+            plate._cpPips[i]:Hide()
+            if plate._cpPips[i]._bg then plate._cpPips[i]._bg:Hide() end
+            if plate._cpPips[i]._secretBar then plate._cpPips[i]._secretBar:Hide() end
+        end
+        EnsureClassPowerBar(plate)
+        local bar = plate._cpBar
+        local cur = UnitPower("player", 2) or 0  -- Enum.PowerType.Focus = 2
+        local maxF = UnitPowerMax("player", 2) or 100
+        if issecretvalue and issecretvalue(maxF) then maxF = 100 end
+        if not maxF or maxF <= 0 then maxF = 100 end
+
+        local scaledW = CP_PIP_W * cpScale * 6
+        local scaledH = CP_PIP_H * cpScale
+        bar:ClearAllPoints()
+        bar:SetSize(scaledW, scaledH)
+        bar:SetPoint(anchorPoint, anchorFrame, anchorRelPoint,
+            cpXOff, yDir * cpYOff)
+        bar:SetMinMaxValues(0, maxF)
         bar:SetValue(cur)
 
         local _, pClass = UnitClass("player")
@@ -2352,8 +2414,9 @@ local function RefreshThreatCache()
     or (C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap()) then
         _inThreatContent = false
     else
+        local isDelve = C_PartyInfo and C_PartyInfo.IsDelveInProgress and C_PartyInfo.IsDelveInProgress()
         _inThreatContent = (instanceType == "party" or instanceType == "raid"
-                            or difficultyID == 204)  -- delve difficulty
+                            or isDelve)
     end
     -- Role: cache so we don't recalculate on every nameplate update
     local role = UnitGroupRolesAssigned("player")
@@ -2386,7 +2449,7 @@ end
 local function IsQuestMob(unit)
     if not C_TooltipInfo or not QUEST_LINE_TYPES then return false end
     if questMobCache[unit] ~= nil then return questMobCache[unit] end
-    -- Skip inside instances â€” quest mobs are open-world only
+    -- Skip inside instances quest mobs are open-world only
     if InRealInstancedContent() then
         questMobCache[unit] = false
         return false
@@ -2446,19 +2509,23 @@ questCacheWatcher:SetScript("OnEvent", function()
 end)
 
 local function GetReactionColor(unit)
-    local db = EllesmereUINameplatesDB
-    -- 1. Tapped â€” always highest
-    if UnitIsTapDenied(unit) then
-        return db.tapped.r, db.tapped.g, db.tapped.b
+    local db = EllesmereUINameplatesDB or defaults
+    local function C(key)
+        return db[key] or defaults[key]
     end
-    -- 2. Quest mob â€” second highest
+    -- 1. Tapped always highest
+    if UnitIsTapDenied(unit) then
+        local c = C("tapped")
+        return c.r, c.g, c.b
+    end
+    -- 2. Quest mob second highest
     if db.questMobColorEnabled and IsQuestMob(unit) then
         local qc = db.questMobColor or defaults.questMobColor
         return qc.r, qc.g, qc.b
     end
-    -- 3â€“4. Threat colors that can NEVER be overwritten:
-    --   â€¢ Non-tank: has aggro, near aggro
-    --   â€¢ Tank: losing aggro, no aggro
+    -- Threat colors that can NEVER be overwritten:
+    -- Non-tank: has aggro, near aggro
+    -- Tank: losing aggro, no aggro
     local isThreatUnit = false   -- set true when threat data exists
     local threatStatus = 0
     if InRealInstancedContent() then
@@ -2467,48 +2534,64 @@ local function GetReactionColor(unit)
             isThreatUnit = true
             threatStatus = status
             if not _isTankRole then
-                -- Non-tank: has aggro / near aggro â€” absolute priority
+                -- Non-tank: has aggro / near aggro absolute priority
                 -- Only apply when in a group (solo players always have aggro)
                 if IsInGroup() then
                 if status >= 3 then
-                    return db.dpsHasAggro.r, db.dpsHasAggro.g, db.dpsHasAggro.b
+                    local c = C("dpsHasAggro")
+                    return c.r, c.g, c.b
                 elseif status >= 2 then
-                    return db.dpsNearAggro.r, db.dpsNearAggro.g, db.dpsNearAggro.b
+                    local c = C("dpsNearAggro")
+                    return c.r, c.g, c.b
                 end
                 end
             else
-                -- Tank: losing aggro / no aggro â€” absolute priority
+                -- Tank: losing aggro / no aggro absolute priority
                 if status < 3 and status >= 2 then
-                    return db.tankLosingAggro.r, db.tankLosingAggro.g, db.tankLosingAggro.b
+                    local c = C("tankLosingAggro")
+                    return c.r, c.g, c.b
                 elseif status < 3 then
                     -- Only show no-aggro warning if a non-tank has it.
                     -- If another tank holds aggro, this is normal offtank positioning.
                     local unitTarget = unit .. "target"
                     local targetRole = UnitExists(unitTarget) and UnitGroupRolesAssigned(unitTarget) or "NONE"
                     if targetRole ~= "TANK" then
-                        return db.tankNoAggro.r, db.tankNoAggro.g, db.tankNoAggro.b
+                        local c = C("tankNoAggro")
+                        return c.r, c.g, c.b
                     end
                     -- Another tank has aggro -- fall through, no warning color
                 end
-                -- Tank has aggro falls through to be handled below focus/caster/miniboss
+                -- Classic tank aggro: has-aggro overrides all mob-type colors
+                if status >= 3 then
+                    local classic = db.classicTankAggro
+                    if classic == nil then classic = defaults.classicTankAggro end
+                    if classic then
+                        local c = C("tankHasAggro")
+                        return c.r, c.g, c.b
+                    end
+                end
+                -- Default: tank has aggro falls through to caster/miniboss colors
             end
         end
     end
     -- 4. Focus color (if enabled)
-    if db.focus and UnitIsUnit(unit, "focus") then
+    local focusC = C("focus")
+    if focusC and UnitIsUnit(unit, "focus") then
         local enabled = defaults.focusColorEnabled
         if db.focusColorEnabled ~= nil then enabled = db.focusColorEnabled end
         if enabled then
-            return db.focus.r, db.focus.g, db.focus.b
+            return focusC.r, focusC.g, focusC.b
         end
     end
     -- 5. Neutral
     local reaction = UnitReaction(unit, "player")
     if reaction and reaction == 4 then
-        return db.neutral.r, db.neutral.g, db.neutral.b
+        local c = C("neutral")
+        return c.r, c.g, c.b
     end
     if UnitCanAttack("player", unit) and not UnitIsEnemy(unit, "player") then
-        return db.neutral.r, db.neutral.g, db.neutral.b
+        local c = C("neutral")
+        return c.r, c.g, c.b
     end
     -- 6. Enemy player class colors
     if UnitIsPlayer(unit) and UnitCanAttack("player", unit) then
@@ -2525,38 +2608,47 @@ local function GetReactionColor(unit)
         local level = UnitLevel(unit)
         local playerLevel = UnitLevel("player")
         if level == -1 or (playerLevel and level >= playerLevel + 1) then
+            local c = C("miniboss")
             if type(inCombat) == "boolean" and inCombat then
-                return db.miniboss.r, db.miniboss.g, db.miniboss.b
+                return c.r, c.g, c.b
             else
-                return DarkenColor(db.miniboss.r, db.miniboss.g, db.miniboss.b)
+                return DarkenColor(c.r, c.g, c.b)
             end
         end
     end
     -- 8. Caster
     local unitClass = UnitClassBase and UnitClassBase(unit)
     if unitClass == "PALADIN" then
+        local c = C("caster")
         if type(inCombat) == "boolean" and inCombat then
-            return db.caster.r, db.caster.g, db.caster.b
+            return c.r, c.g, c.b
         else
-            return DarkenColor(db.caster.r, db.caster.g, db.caster.b)
+            return DarkenColor(c.r, c.g, c.b)
         end
     end
-    -- 9. Tank has aggro (if enabled) â€” below focus/caster/miniboss
+    -- 9. Tank has aggro (if enabled) below focus/caster/miniboss
     if isThreatUnit and _isTankRole and threatStatus >= 3 then
         local enabled = defaults.tankHasAggroEnabled
         if db.tankHasAggroEnabled ~= nil then enabled = db.tankHasAggroEnabled end
         if enabled then
-            return db.tankHasAggro.r, db.tankHasAggro.g, db.tankHasAggro.b
+            local c = C("tankHasAggro")
+            return c.r, c.g, c.b
         end
     end
     -- 10. Fallback: enemy in combat / out of combat
+    local eic = C("enemyInCombat")
     if type(inCombat) == "boolean" and inCombat then
-        return db.enemyInCombat.r, db.enemyInCombat.g, db.enemyInCombat.b
+        return eic.r, eic.g, eic.b
     end
-    return DarkenColor(db.enemyInCombat.r, db.enemyInCombat.g, db.enemyInCombat.b)
+    return DarkenColor(eic.r, eic.g, eic.b)
 end
 local hookedUFs = {}
 local hookedHighlights = {}
+-- Per-nameplate cache of important debuff auraInstanceIDs.
+-- Updated by hooking Blizzard's AurasFrame processing so the set is always
+-- current regardless of UNIT_AURA event ordering between our frame and theirs.
+local importantDebuffCache = {}  -- [nameplate] = { [auraInstanceID] = true }
+local hookedAurasFrames = {}     -- [AurasFrame] = true (prevent double-hooking)
 local npOffscreenParent = CreateFrame("Frame")
 npOffscreenParent:Hide()
 local storedParents = {}
@@ -2604,18 +2696,37 @@ local function HideBlizzardFrame(nameplate, unit)
         MoveToOffscreen(uf.RaidTargetFrame, unit)
         MoveToOffscreen(uf.PlayerLevelDiffFrame, unit)
         if uf.BuffFrame then uf.BuffFrame:SetAlpha(0) end
-        -- Move AurasFrame list frames offscreen â€” we query C_UnitAuras
+        -- Move AurasFrame list frames offscreen -- we query C_UnitAuras
         -- directly for debuff/CC data so these visual lists are unused.
         if uf.AurasFrame then
             MoveToOffscreen(uf.AurasFrame.DebuffListFrame, unit)
             MoveToOffscreen(uf.AurasFrame.BuffListFrame, unit)
             MoveToOffscreen(uf.AurasFrame.CrowdControlListFrame, unit)
             MoveToOffscreen(uf.AurasFrame.LossOfControlFrame, unit)
+            -- Hook Blizzard's UnitFrame OnEvent to snapshot debuffList after
+            -- every UNIT_AURA. This eliminates event-ordering issues between
+            -- our handler and Blizzard's.
+            if not hookedAurasFrames[uf.AurasFrame] then
+                hookedAurasFrames[uf.AurasFrame] = true
+                uf:HookScript("OnEvent", function(self, evt)
+                    if evt ~= "UNIT_AURA" then return end
+                    local myAF = self.AurasFrame
+                    if not myAF or not myAF.debuffList then return end
+                    local np = self:GetParent()
+                    if not np then return end
+                    local cache = importantDebuffCache[np]
+                    if not cache then cache = {}; importantDebuffCache[np] = cache
+                    else wipe(cache) end
+                    if myAF.debuffList.Iterate then
+                        myAF.debuffList:Iterate(function(id)
+                            cache[id] = true
+                        end)
+                    end
+                end)
+            end
         end
-        -- Do NOT unregister events on the Blizzard UnitFrame â€” we need its
-        -- AurasFrame to keep processing UNIT_AURA so debuffList stays current
-        -- for our "important" debuff filtering.  All visual children are already
-        -- reparented offscreen so layout recalculations won't shift bounds.
+        -- All visual children are reparented offscreen so layout
+        -- recalculations won't shift bounds.
         -- Only silence the castBar events (we render our own cast bar).
         if uf.castBar then
             uf.castBar:UnregisterAllEvents()
@@ -2704,9 +2815,11 @@ end
 ns.HideBlizzardFrame = HideBlizzardFrame
 local castFallbackFrame = CreateFrame("Frame")
 local fallbackCastCount = 0
+local _fallbackPlates = {}
+local _importantSetBuf = {}
 castFallbackFrame:SetScript("OnUpdate", function()
-    for _, plate in pairs(ns.plates) do
-        if plate._castFallback and plate.isCasting and plate.unit and plate.nameplate then
+    for plate in pairs(_fallbackPlates) do
+        if plate.isCasting and plate.unit and plate.nameplate then
             local bc = plate.nameplate.UnitFrame and plate.nameplate.UnitFrame.castBar
             if bc and bc:IsShown() then
                 plate.cast:SetMinMaxValues(bc:GetMinMaxValues())
@@ -2717,6 +2830,7 @@ castFallbackFrame:SetScript("OnUpdate", function()
                 end
                 plate.isCasting = false
                 plate._castFallback = nil
+                _fallbackPlates[plate] = nil
                 fallbackCastCount = fallbackCastCount - 1
                 if fallbackCastCount <= 0 then
                     fallbackCastCount = 0
@@ -2756,7 +2870,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     -- Single center anchor: the entire plate moves as one unit when the
     -- nameplate bounces by 1px, preventing individual edges from rounding
     -- independently (the "pixel shimmer" / bouncing-sides issue).
-    self:SetPoint("CENTER", nameplate, "CENTER", 0, 0)
+    self:SetPoint("CENTER", nameplate, "CENTER", 0, GetHitboxYShift())
     self:SetSize(1, 1)
     self:SetFrameLevel(nameplate:GetFrameLevel() + 1)
     self:Show()
@@ -2850,10 +2964,10 @@ function NameplateFrame:SetUnit(unit, nameplate)
                     classToken = UnitClassBase(targetUnit)
                 end
             end
-            if classToken then
-                local okC, c = pcall(function() return RAID_CLASS_COLORS and RAID_CLASS_COLORS[classToken] end)
-                if okC and c then
-                    self.castTarget:SetTextColor(c.r, c.g, c.b, 1)
+            if classToken and C_ClassColor then
+                local c = C_ClassColor.GetClassColor(classToken)
+                if c then
+                    self.castTarget:SetTextColor(c:GetRGB())
                     appliedCTC = true
                 end
             end
@@ -2870,7 +2984,7 @@ function NameplateFrame:SetUnit(unit, nameplate)
     local auraDurColor = (db and db.auraDurationTextColor) or defaults.auraDurationTextColor
     local auraStackSize = (db and db.auraStackTextSize) or defaults.auraStackTextSize
     local auraStackColor = (db and db.auraStackTextColor) or defaults.auraStackTextColor
-    -- Aura timer positions (per-type: debuffs, buffs, CCs â€” with "none" to hide)
+    -- Aura timer positions (per-type: debuffs, buffs, CCs with "none" to hide)
     local debuffTPos = (db and db.debuffTimerPosition) or (db and db.auraTextPosition) or defaults.debuffTimerPosition
     local buffTPos   = (db and db.buffTimerPosition)   or (db and db.auraTextPosition) or defaults.buffTimerPosition
     local ccTPos     = (db and db.ccTimerPosition)     or (db and db.auraTextPosition) or defaults.ccTimerPosition
@@ -2955,6 +3069,13 @@ if self.absorbOverflow then
     self.absorbOverflow:SetHeight(GetHealthBarHeight())
 end
     HideBlizzardFrame(nameplate, unit)
+    -- Re-register UNIT_AURA on Blizzard's UnitFrame so it keeps processing
+    -- auras and updating debuffList/buffList. HideBlizzardFrame sets alpha=0
+    -- which can cause the driver to stop dispatching aura events to the UF.
+    local uf = nameplate.UnitFrame
+    if uf then
+        uf:RegisterUnitEvent("UNIT_AURA", unit)
+    end
     self:RegisterUnitEvent("UNIT_HEALTH", unit)
     self:RegisterUnitEvent("UNIT_ABSORB_AMOUNT_CHANGED", unit)
     self:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
@@ -2986,11 +3107,11 @@ end
 function NameplateFrame:ClearUnit()
     self:UnregisterAllEvents()
     
-    
     if self.isCasting then
         self.isCasting = false
         if self._castFallback then
             self._castFallback = nil
+            _fallbackPlates[self] = nil
             fallbackCastCount = fallbackCastCount - 1
             if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
         end
@@ -3001,40 +3122,28 @@ function NameplateFrame:ClearUnit()
     for i = 1, 2 do
         local slot = self.cc[i]
         if slot.cd then
-            if slot.cd.Clear then
-                slot.cd:Clear()
-            elseif CooldownFrame_Clear then
-                CooldownFrame_Clear(slot.cd)
-            else
-                slot.cd:SetCooldown(0, 0)
-            end
+            if slot.cd.SetDrawSwipe then slot.cd:SetDrawSwipe(false) end
+            if slot.cd.Clear then slot.cd:Clear() else slot.cd:SetCooldown(0, 0) end
         end
+        slot.icon:SetTexture(nil)
         slot:Hide()
     end
     for i = 1, 4 do
         local dSlot = self.debuffs[i]
         if dSlot.cd then
-            if dSlot.cd.Clear then
-                dSlot.cd:Clear()
-            elseif CooldownFrame_Clear then
-                CooldownFrame_Clear(dSlot.cd)
-            else
-                dSlot.cd:SetCooldown(0, 0)
-            end
+            if dSlot.cd.SetDrawSwipe then dSlot.cd:SetDrawSwipe(false) end
+            if dSlot.cd.Clear then dSlot.cd:Clear() else dSlot.cd:SetCooldown(0, 0) end
         end
+        dSlot.icon:SetTexture(nil)
         dSlot:Hide()
         ns.StopPandemicGlow(dSlot)
         dSlot._durationObj = nil
         local bSlot = self.buffs[i]
         if bSlot.cd then
-            if bSlot.cd.Clear then
-                bSlot.cd:Clear()
-            elseif CooldownFrame_Clear then
-                CooldownFrame_Clear(bSlot.cd)
-            else
-                bSlot.cd:SetCooldown(0, 0)
-            end
+            if bSlot.cd.SetDrawSwipe then bSlot.cd:SetDrawSwipe(false) end
+            if bSlot.cd.Clear then bSlot.cd:Clear() else bSlot.cd:SetCooldown(0, 0) end
         end
+        bSlot.icon:SetTexture(nil)
         bSlot:Hide()
     end
     self.unit = nil
@@ -3046,6 +3155,7 @@ function NameplateFrame:ClearUnit()
     self.castBarOverlay:SetAlpha(0)
     self.isCasting = false
     self._castFallback = nil
+    _fallbackPlates[self] = nil
     self._kickProtected = nil
     self:HideKickTick()
     if self._interruptTimer then
@@ -3053,12 +3163,12 @@ function NameplateFrame:ClearUnit()
         self._interruptTimer = nil
     end
     self._interrupted = nil
-    self.glow:Hide()
+    if self.glow then self.glow:Hide() end
     self.highlight:Hide()
     self.raidFrame:Hide()
     self.classFrame:Hide()
-    self.leftArrow:Hide()
-    self.rightArrow:Hide()
+    if self.leftArrow then self.leftArrow:Hide() end
+    if self.rightArrow then self.rightArrow:Hide() end
     HideClassPowerOnPlate(self)
     self.absorb:Hide()
     if self.absorbOverflow then
@@ -3139,7 +3249,7 @@ function NameplateFrame:UpdateHealthValues()
         local pctVal = UnitHealthPercent(unit, true, CurveConstants.ScaleTo100)
         pctText = string.format("%d%%", pctVal)
         pctNoSignText = string.format("%d", pctVal)
-        numText = AbbreviateNumbers(UnitHealth(unit))
+        numText = AbbreviateLargeNumbers(UnitHealth(unit))
     else
         pctText = ""
         pctNoSignText = ""
@@ -3152,13 +3262,8 @@ function NameplateFrame:UpdateHealthValues()
     self.hpText:Hide()
     self.hpNumber:Hide()
 
-    -- Helper to show a health FontString in a bar slot
-    local barSlots = {
-        { key = "textSlotRight",  anchor = "RIGHT",  point = "RIGHT",  xOff = -2 },
-        { key = "textSlotLeft",   anchor = "LEFT",   point = "LEFT",   xOff = 4 },
-        { key = "textSlotCenter", anchor = "CENTER", point = "CENTER", xOff = 0 },
-    }
-    for _, slot in ipairs(barSlots) do
+    for si = 1, #HP_BAR_SLOTS do
+        local slot = HP_BAR_SLOTS[si]
         local element = GetTextSlot(slot.key)
         local txOff, tyOff = GetTextSlotOffsets(slot.key)
         local slotFontSz = GetTextSlotSize(slot.key)
@@ -3228,7 +3333,7 @@ function NameplateFrame:UpdateHealthValues()
                 fs:SetText(FormatCombinedHealth(topElement, pctText, numText))
             end
         end
-        SetFSFont(fs, topFontSz, GetNPOutline())      SetFSFont(fs, topFontSz, GetNPOutline())
+        SetFSFont(fs, topFontSz, GetNPOutline())
         fs:SetParent(self.topTextFrame)
         fs:ClearAllPoints()
         PP.Point(fs, "BOTTOM", self.health, "TOP", txOff, 4 + nameYOff + cpPush + tyOff)
@@ -3243,26 +3348,25 @@ function NameplateFrame:UpdateHealthColor()
     self.health:SetStatusBarColor(GetReactionColor(unit))
     -- Focus overlay: show stripe textures on focus target's health bar
     -- Fill clip frame at full alpha, bg clip frame at half alpha
-    if self.focusClipFill then
-        local db = EllesmereUINameplatesDB or defaults
-        local tex = db.focusOverlayTexture or defaults.focusOverlayTexture
-        if tex ~= "none" and UnitIsUnit(unit, "focus") then
-            local MEDIA = "Interface\\AddOns\\EllesmereUINameplates\\Media\\"
-            local texPath = MEDIA .. tex .. ".png"
-            local overlayAlpha = db.focusOverlayAlpha or defaults.focusOverlayAlpha
-            local oc = db.focusOverlayColor or defaults.focusOverlayColor
-            self.focusOverlayFill:SetTexture(texPath)
-            self.focusOverlayFill:SetAlpha(overlayAlpha)
-            self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
-            self.focusClipFill:Show()
-            self.focusOverlayBg:SetTexture(texPath)
-            self.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
-            self.focusOverlayBg:SetVertexColor(oc.r, oc.g, oc.b)
-            self.focusClipBg:Show()
-        else
-            self.focusClipFill:Hide()
-            self.focusClipBg:Hide()
-        end
+    local db2 = EllesmereUINameplatesDB or defaults
+    local focusTex = db2.focusOverlayTexture or defaults.focusOverlayTexture
+    if focusTex ~= "none" and UnitIsUnit(unit, "focus") then
+        EnsureFocusOverlay(self)
+        local MEDIA = "Interface\\AddOns\\EllesmereUINameplates\\Media\\"
+        local texPath = MEDIA .. focusTex .. ".png"
+        local overlayAlpha = db2.focusOverlayAlpha or defaults.focusOverlayAlpha
+        local oc = db2.focusOverlayColor or defaults.focusOverlayColor
+        self.focusOverlayFill:SetTexture(texPath)
+        self.focusOverlayFill:SetAlpha(overlayAlpha)
+        self.focusOverlayFill:SetVertexColor(oc.r, oc.g, oc.b)
+        self.focusClipFill:Show()
+        self.focusOverlayBg:SetTexture(texPath)
+        self.focusOverlayBg:SetAlpha(overlayAlpha * 0.3)
+        self.focusOverlayBg:SetVertexColor(oc.r, oc.g, oc.b)
+        self.focusClipBg:Show()
+    elseif self.focusClipFill then
+        self.focusClipFill:Hide()
+        self.focusClipBg:Hide()
     end
 end
 function NameplateFrame:UpdateHealth()
@@ -3451,8 +3555,9 @@ function NameplateFrame:ApplyTarget()
     local isTarget = UnitIsUnit(self.unit, "target")
     local style = GetTargetGlowStyle()
     if isTarget and style ~= "none" then
+        EnsureGlow(self)
         self.glow:Show()
-    else
+    elseif self.glow then
         self.glow:Hide()
     end
     -- Vibrant: override health bar border to white on selected target
@@ -3464,17 +3569,18 @@ function NameplateFrame:ApplyTarget()
     end
     if EllesmereUINameplatesDB and EllesmereUINameplatesDB.showTargetArrows then
         if isTarget then
+            EnsureArrows(self)
             local sc = EllesmereUINameplatesDB.targetArrowScale or 1.0
             local aw, ah = math.floor(11 * sc + 0.5), math.floor(16 * sc + 0.5)
             PP.Size(self.leftArrow,  aw, ah)
             PP.Size(self.rightArrow, aw, ah)
             self.leftArrow:Show()
             self.rightArrow:Show()
-        else
+        elseif self.leftArrow then
             self.leftArrow:Hide()
             self.rightArrow:Hide()
         end
-    else
+    elseif self.leftArrow then
         self.leftArrow:Hide()
         self.rightArrow:Hide()
     end
@@ -3497,228 +3603,216 @@ function NameplateFrame:ApplyMouseover()
         self.highlight:Hide()
     end
 end
+-- Fill an aura slot with icon, cooldown, and stack count data.
+-- File-level to avoid closure allocation per UpdateAuras call.
+local _fillGetCount = C_UnitAuras.GetAuraApplicationDisplayCount
+local _fillGetDur   = C_UnitAuras.GetAuraDuration
+local function FillAuraSlot(slot, aura, id, unit, shown)
+    slot.icon:SetTexture(aura.icon)
+    slot.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    if _fillGetCount and slot.count then
+        slot.count:SetText(_fillGetCount(unit, id, 2, 1000) or "")
+    end
+    local cd = slot.cd
+    if cd and _fillGetDur then
+        local durObj = _fillGetDur(unit, id)
+        if durObj and cd.SetCooldownFromDurationObject then
+            if cd.SetDrawSwipe then cd:SetDrawSwipe(true) end
+            cd:SetCooldownFromDurationObject(durObj)
+            cd:Show()
+        end
+        slot._durationObj = durObj
+    end
+    slot:Show()
+    shown[id] = true
+end
 function NameplateFrame:UpdateAuras(updateInfo)
     if not self.unit or not self.nameplate then return end
     local unit = self.unit
 
-    local needsFullRefresh = not updateInfo or updateInfo.isFullUpdate or not self._shownAuras
-    
-    if not needsFullRefresh then
-        local hasRelevantChange = false
-        if updateInfo.addedAuras and #updateInfo.addedAuras > 0 then
-            -- Always refresh when auras are added so the new debuff/buff
-            -- can be evaluated against IsAuraFilteredOutByInstanceID.
-            hasRelevantChange = true
+    -- Incremental early-exit: skip if no relevant aura changed
+    if updateInfo and not updateInfo.isFullUpdate and self._shownAuras then
+        local dominated = self._shownAuras
+        local dominated_hit = false
+        local added = updateInfo.addedAuras
+        if added and #added > 0 then
+            dominated_hit = true
         end
-        if not hasRelevantChange and updateInfo.removedAuraInstanceIDs then
-            for _, id in ipairs(updateInfo.removedAuraInstanceIDs) do
-                if self._shownAuras[id] then
-                    hasRelevantChange = true
-                    break
+        if not dominated_hit then
+            local removed = updateInfo.removedAuraInstanceIDs
+            if removed then
+                for i = 1, #removed do
+                    if dominated[removed[i]] then dominated_hit = true; break end
                 end
             end
         end
-        if not hasRelevantChange and updateInfo.updatedAuraInstanceIDs then
-            for _, id in ipairs(updateInfo.updatedAuraInstanceIDs) do
-                if self._shownAuras[id] then
-                    hasRelevantChange = true
-                    break
+        if not dominated_hit then
+            local updated = updateInfo.updatedAuraInstanceIDs
+            if updated then
+                for i = 1, #updated do
+                    if dominated[updated[i]] then dominated_hit = true; break end
                 end
             end
         end
-        if not hasRelevantChange then
-            return
-        end
+        if not dominated_hit then return end
     end
 
-    if not self._shownAuras then
-        self._shownAuras = {}
-    else
-        wipe(self._shownAuras)
-    end
+    local shown = self._shownAuras
+    if shown then wipe(shown) else shown = {}; self._shownAuras = shown end
 
+    -- Slot references
+    local debuffs, buffs, cc = self.debuffs, self.buffs, self.cc
+
+    -- Reset debuff + buff slots
     for i = 1, 4 do
-        local dSlot = self.debuffs[i]
-        local bSlot = self.buffs[i]
-        dSlot:Hide()
-        if dSlot.pandemicGlow and dSlot.pandemicGlow.active then
-            ns.StopPandemicGlow(dSlot)
-        end
-        dSlot._durationObj = nil
-        bSlot:Hide()
-        local dCd = dSlot.cd
+        local ds, bs = debuffs[i], buffs[i]
+        ds:Hide(); ds.icon:SetTexture(nil); ds._durationObj = nil
+        if ds.pandemicGlow and ds.pandemicGlow.active then ns.StopPandemicGlow(ds) end
+        bs:Hide(); bs.icon:SetTexture(nil)
+        local dCd = ds.cd
         if dCd then
-            if dCd.Clear then dCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(dCd)
-            else dCd:SetCooldown(0, 0) end
+            if dCd.SetDrawSwipe then dCd:SetDrawSwipe(false) end
+            if dCd.Clear then dCd:Clear() else dCd:SetCooldown(0, 0) end
         end
-        local bCd = bSlot.cd
+        local bCd = bs.cd
         if bCd then
-            if bCd.Clear then bCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(bCd)
-            else bCd:SetCooldown(0, 0) end
+            if bCd.SetDrawSwipe then bCd:SetDrawSwipe(false) end
+            if bCd.Clear then bCd:Clear() else bCd:SetCooldown(0, 0) end
         end
     end
+    -- Reset CC slots
     for i = 1, 2 do
-        local ccSlot = self.cc[i]
-        ccSlot:Hide()
-        local cCd = ccSlot.cd
+        local cs = cc[i]
+        cs:Hide(); cs.icon:SetTexture(nil)
+        local cCd = cs.cd
         if cCd then
-            if cCd.Clear then cCd:Clear()
-            elseif CooldownFrame_Clear then CooldownFrame_Clear(cCd)
-            else cCd:SetCooldown(0, 0) end
+            if cCd.SetDrawSwipe then cCd:SetDrawSwipe(false) end
+            if cCd.Clear then cCd:Clear() else cCd:SetCooldown(0, 0) end
         end
     end
-    -- Get slot assignments; skip processing for any slot set to "none"
+
     local debuffSlotVal, buffSlotVal, ccSlotVal = GetAuraSlots()
-    local dIdx = 1
     local db = EllesmereUINameplatesDB
+    local GetUnitAuras = C_UnitAuras.GetUnitAuras
+
+    ---------------------------------------------------------------------------
+    --  Debuffs
+    ---------------------------------------------------------------------------
+    local dCount = 0
     if debuffSlotVal ~= "none" then
-    local showAll = db and db.showAllDebuffs
-    -- Build the "important" set from Blizzard's own nameplate debuff list.
-    -- Our UNIT_AURA handler defers via C_Timer.After(0) so Blizzard's
-    -- UnitFrame has already processed the event and debuffList is current.
-    local importantSet
-    if not showAll and self.nameplate then
-        importantSet = {}
-        local uf = self.nameplate.UnitFrame
-        if uf and uf.AurasFrame and uf.AurasFrame.debuffList and uf.AurasFrame.debuffList.Iterate then
-            uf.AurasFrame.debuffList:Iterate(function(auraInstanceID)
-                importantSet[auraInstanceID] = true
+        local showAll = db and db.showAllDebuffs
+        -- Read the important set from our cache, which is updated by the
+        -- AurasFrame hook every time Blizzard processes auras. This is
+        -- immune to UNIT_AURA event ordering issues.
+        local importantSet
+        if not showAll then
+            local np = self.nameplate
+            importantSet = np and importantDebuffCache[np]
+            -- If the cache is empty, try reading debuffList directly as fallback
+            if not importantSet or not next(importantSet) then
+                wipe(_importantSetBuf)
+                importantSet = _importantSetBuf
+                local af = np and np.UnitFrame and np.UnitFrame.AurasFrame
+                if af and af.debuffList and af.debuffList.Iterate then
+                    af.debuffList:Iterate(function(auraInstanceID)
+                        importantSet[auraInstanceID] = true
+                    end)
+                end
+            end
+        end
+        local list = GetUnitAuras(unit, "HARMFUL|PLAYER")
+        if list then
+            for i = 1, #list do
+                if dCount >= 4 then break end
+                local aura = list[i]
+                local id = aura and aura.auraInstanceID
+                if id and aura.icon then
+                    if showAll or (importantSet and importantSet[id]) then
+                        dCount = dCount + 1
+                        FillAuraSlot(debuffs[dCount], aura, id, unit, shown)
+                    end
+                end
+            end
+        end
+        -- If the important filter excluded ALL player debuffs but we have
+        -- active ones, the cache may not have been populated yet. Retry once.
+        if not showAll and dCount == 0 and list and #list > 0 and not self._auraRetry then
+            self._auraRetry = true
+            C_Timer.After(0, function()
+                self._auraRetry = nil
+                if self.unit then self:UpdateAuras() end
             end)
         end
-    end
-    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local allDebuffs = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|PLAYER")
-        if allDebuffs then
-            local GetCount = C_UnitAuras.GetAuraApplicationDisplayCount
-            local GetDur = C_UnitAuras.GetAuraDuration
-            for _, aura in ipairs(allDebuffs) do
-                if dIdx > 4 then break end
-                local id = aura and aura.auraInstanceID
-                if id and (showAll or (importantSet and importantSet[id])) then
-                        local slot = self.debuffs[dIdx]
-                        slot.icon:SetTexture(aura.icon)
-                        if GetCount then
-                            slot.count:SetText(GetCount(unit, id, 2, 1000) or "")
-                        end
-                        local cd = slot.cd
-                        if cd and GetDur then
-                            local durObj = GetDur(unit, id)
-                            if durObj and cd.SetCooldownFromDurationObject then
-                                cd:SetCooldownFromDurationObject(durObj)
-                                cd:Show()
-                            end
-                            slot._durationObj = durObj
-                        else
-                            slot._durationObj = nil
-                        end
-                        slot:Show()
-                        self._shownAuras[id] = true
-                        dIdx = dIdx + 1
-                end
-            end
+        if dCount > 0 then
+            local spacing = GetAuraSpacing()
+            local sz = GetDebuffIconSize()
+            for i = 1, dCount do PP.Size(debuffs[i], sz, sz) end
+            PositionAuraSlot(debuffs, dCount, debuffSlotVal, self, sz, sz, spacing, GetAuraSlotOffsets("debuffSlot"))
         end
-    end
-    local debuffCount = dIdx - 1
-    if debuffCount > 0 then
-        local spacing = GetAuraSpacing()
-        local debuffSz = GetDebuffIconSize()
-        for i = 1, debuffCount do
-            PP.Size(self.debuffs[i], debuffSz, debuffSz)
-        end
-        PositionAuraSlot(self.debuffs, debuffCount, debuffSlotVal, self, debuffSz, debuffSz, spacing, GetAuraSlotOffsets("debuffSlot"))
-    end
-    -- Pandemic glow check for debuffs
-    local pandemicEnabled = GetPandemicGlow()
-    for i = 1, 4 do
-        local slot = self.debuffs[i]
-        local pg = slot.pandemicGlow
-        if i <= (dIdx - 1) and pandemicEnabled then
-            ns.ApplyPandemicGlow(slot)
-        else
-            if pg and pg.active then
+        -- Pandemic glow
+        local pandemicOn = GetPandemicGlow()
+        for i = 1, 4 do
+            local slot = debuffs[i]
+            if i <= dCount and pandemicOn then
+                ns.ApplyPandemicGlow(slot)
+            elseif slot.pandemicGlow and slot.pandemicGlow.active then
                 ns.StopPandemicGlow(slot)
             end
         end
     end
-    end -- debuffSlotVal ~= "none"
-    if buffSlotVal ~= "none" then
-    if UnitCanAttack("player", unit) and C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local allBuffs = C_UnitAuras.GetUnitAuras(unit, "HELPFUL|INCLUDE_NAME_PLATE_ONLY")
-        local bIdx = 1
-        if allBuffs then
-            local GetCount = C_UnitAuras.GetAuraApplicationDisplayCount
-            local GetDur = C_UnitAuras.GetAuraDuration
-            for _, aura in ipairs(allBuffs) do
-                if bIdx > 4 then break end
+
+    ---------------------------------------------------------------------------
+    --  Buffs
+    ---------------------------------------------------------------------------
+    local bCount = 0
+    if buffSlotVal ~= "none" and UnitCanAttack("player", unit) then
+        local list = GetUnitAuras(unit, "HELPFUL|INCLUDE_NAME_PLATE_ONLY")
+        if list then
+            for i = 1, #list do
+                if bCount >= 4 then break end
+                local aura = list[i]
                 local id = aura and aura.auraInstanceID
-                if id and type(aura.dispelName) ~= "nil" then
-                    local slot = self.buffs[bIdx]
-                    slot.icon:SetTexture(aura.icon)
-                    if GetCount then
-                        slot.count:SetText(GetCount(unit, id, 2, 1000) or "")
-                    end
-                    local cd = slot.cd
-                    if cd and GetDur then
-                        local durObj = GetDur(unit, id)
-                        if durObj and cd.SetCooldownFromDurationObject then
-                            cd:SetCooldownFromDurationObject(durObj)
-                            cd:Show()
-                        end
-                    end
-                    slot:Show()
-                    self._shownAuras[id] = true
-                    bIdx = bIdx + 1
+                if id and aura.dispelName ~= nil and aura.icon then
+                    bCount = bCount + 1
+                    FillAuraSlot(buffs[bCount], aura, id, unit, shown)
                 end
             end
         end
     end
-    end -- buffSlotVal ~= "none"
-    local ccShown = 0
+
+    ---------------------------------------------------------------------------
+    --  CC Icons
+    ---------------------------------------------------------------------------
+    local ccCount = 0
     if ccSlotVal ~= "none" then
-    if C_UnitAuras and C_UnitAuras.GetUnitAuras then
-        local ccAuras = C_UnitAuras.GetUnitAuras(unit, "HARMFUL|CROWD_CONTROL")
-        if ccAuras then
-            local GetDur = C_UnitAuras.GetAuraDuration
-            for _, aura in ipairs(ccAuras) do
-                if ccShown >= 2 then break end
-                if aura and aura.auraInstanceID then
-                    ccShown = ccShown + 1
-                    local slot = self.cc[ccShown]
-                    slot.icon:SetTexture(aura.icon)
-                    slot.icon:Show()
-                    local cd = slot.cd
-                    if cd and GetDur then
-                        local durObj = GetDur(unit, aura.auraInstanceID)
-                        if durObj and cd.SetCooldownFromDurationObject then
-                            cd:SetCooldownFromDurationObject(durObj)
-                            cd:Show()
-                        end
-                    end
-                    slot:Show()
-                    self._shownAuras[aura.auraInstanceID] = true
+        local list = GetUnitAuras(unit, "HARMFUL|CROWD_CONTROL")
+        if list then
+            for i = 1, #list do
+                if ccCount >= 2 then break end
+                local aura = list[i]
+                if aura and aura.auraInstanceID and aura.icon then
+                    ccCount = ccCount + 1
+                    FillAuraSlot(cc[ccCount], aura, aura.auraInstanceID, unit, shown)
                 end
             end
         end
     end
-    end -- ccSlotVal ~= "none"
-    -- Reposition buffs and CC based on actual shown counts (important when in "top" slot for centering)
-    if buffSlotVal ~= "none" then
-        local buffCount = 0
-        for i = 1, 4 do if self.buffs[i]:IsShown() then buffCount = buffCount + 1 end end
-        if buffCount > 0 then
-            local spacing = GetAuraSpacing()
-            local buffSz = GetBuffIconSize()
-            PositionAuraSlot(self.buffs, buffCount, buffSlotVal, self, buffSz, buffSz, spacing, GetAuraSlotOffsets("buffSlot"))
-        end
-    end
-    if ccSlotVal ~= "none" and ccShown > 0 then
+
+    ---------------------------------------------------------------------------
+    --  Reposition buffs and CC based on actual shown counts
+    ---------------------------------------------------------------------------
+    if bCount > 0 then
         local spacing = GetAuraSpacing()
-        local ccSz = GetCCIconSize()
-        PositionAuraSlot(self.cc, ccShown, ccSlotVal, self, ccSz, ccSz, spacing, GetAuraSlotOffsets("ccSlot"))
+        local sz = GetBuffIconSize()
+        for i = 1, bCount do PP.Size(buffs[i], sz, sz) end
+        PositionAuraSlot(buffs, bCount, buffSlotVal, self, sz, sz, spacing, GetAuraSlotOffsets("buffSlot"))
     end
-    -- Reposition target arrows outside the outermost side auras
+    if ccCount > 0 then
+        local spacing = GetAuraSpacing()
+        local sz = GetCCIconSize()
+        for i = 1, ccCount do PP.Size(cc[i], sz, sz) end
+        PositionAuraSlot(cc, ccCount, ccSlotVal, self, sz, sz, spacing, GetAuraSlotOffsets("ccSlot"))
+    end
     PositionArrowsOutsideAuras(self)
 end
 function NameplateFrame:UpdateCast()
@@ -3739,6 +3833,7 @@ function NameplateFrame:UpdateCast()
         if self.isCasting then
             if self._castFallback then
                 self._castFallback = nil
+                _fallbackPlates[self] = nil
                 fallbackCastCount = fallbackCastCount - 1
                 if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
             end
@@ -3788,10 +3883,10 @@ function NameplateFrame:UpdateCast()
     if db.castTargetClassColor ~= nil then useClassColor = db.castTargetClassColor end
     if useClassColor then
         local appliedCTC = false
-        if spellTargetClass then
-            local okC, c = pcall(function() return RAID_CLASS_COLORS and RAID_CLASS_COLORS[spellTargetClass] end)
-            if okC and c then
-                self.castTarget:SetTextColor(c.r, c.g, c.b, 1)
+        if spellTargetClass and C_ClassColor then
+            local c = C_ClassColor.GetClassColor(spellTargetClass)
+            if c then
+                self.castTarget:SetTextColor(c:GetRGB())
                 appliedCTC = true
             end
         end
@@ -3842,6 +3937,7 @@ function NameplateFrame:UpdateCast()
         if not self.isCasting then
             self.isCasting = true
             self._castFallback = true
+            _fallbackPlates[self] = true
             fallbackCastCount = fallbackCastCount + 1
             castFallbackFrame:Show()
             NotifyCastStarted()
@@ -3890,7 +3986,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
         self:HideKickTick()
         return
     end
-    -- kickProtected is a secret boolean on Midnight â€” cannot branch on it.
+    -- kickProtected is a secret boolean on Midnight cannot branch on it.
     -- Store it so we can apply visibility via SetAlphaFromBoolean after setup.
     self._kickProtected = kickProtected
     if not (C_Spell and C_Spell.GetSpellCooldownDuration) then
@@ -3958,7 +4054,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
             self.kickTick:SetAlpha(0)
         end
         -- Ticker: only updates tick alpha at 10fps.
-        -- Neither positioner nor marker values are updated â€” both are set once
+        -- Neither positioner nor marker values are updated both are set once
         -- at cast start and left alone.  The marker's
         -- secret duration naturally counts down via the engine, moving the
         -- tick mark as the kick CD expires.
@@ -3969,7 +4065,7 @@ function NameplateFrame:UpdateKickTick(kickProtected, isChannel)
                 return
             end
             -- Compute tick visibility: show only when kick is on CD AND cast is interruptible.
-            -- Both are secret booleans â€” chain EvaluateColorValueFromBoolean calls
+            -- Both are secret booleans chain EvaluateColorValueFromBoolean calls
             -- to combine conditions into a single secret alpha.
             local icd = C_Spell.GetSpellCooldownDuration(activeKickSpell)
             if icd and icd.IsZero and C_CurveUtil and C_CurveUtil.EvaluateColorValueFromBoolean then
@@ -3989,6 +4085,7 @@ function NameplateFrame:ShowInterrupted(interrupterGUID)
     if self.isCasting then
         if self._castFallback then
             self._castFallback = nil
+            _fallbackPlates[self] = nil
             fallbackCastCount = fallbackCastCount - 1
             if fallbackCastCount <= 0 then fallbackCastCount = 0; castFallbackFrame:Hide() end
         end
@@ -4074,19 +4171,7 @@ function NameplateFrame:UNIT_ABSORB_AMOUNT_CHANGED()
     self:UpdateHealthValues()
 end
 function NameplateFrame:UNIT_AURA(_, updateInfo)
-    -- Defer aura updates by one frame so Blizzard's UnitFrame has time to
-    -- process the same UNIT_AURA event and update its debuffList.  This
-    -- prevents a race where our handler runs first and the newly added
-    -- aura isn't in the "important" set yet.
-    if self._auraDeferTimer then
-        self._auraDeferTimer:Cancel()
-    end
-    local plate = self
-    local info = updateInfo
-    self._auraDeferTimer = C_Timer.NewTimer(0, function()
-        plate._auraDeferTimer = nil
-        plate:UpdateAuras(info)
-    end)
+    self:UpdateAuras(updateInfo)
 end
 function NameplateFrame:UNIT_NAME_UPDATE()
     self:UpdateName()
@@ -4164,7 +4249,7 @@ CreatePendingWatcher = function(unit, nameplate)
     watcher:RegisterUnitEvent("UNIT_NAME_UPDATE", unit)
     watcher:SetScript("OnEvent", function(self, event, u)
         if not UnitCanAttack("player", u) then return end
-        -- Unit became attackable â€” promote to enemy plate
+        -- Unit became attackable promote to enemy plate
         self:UnregisterAllEvents()
         pendingWatchers[u] = nil
         pendingUnits[u] = nil
@@ -4184,7 +4269,7 @@ CreatePendingWatcher = function(unit, nameplate)
             ns.plates[u] = plate
             plate:SetUnit(u, currentPlate)
         end
-        -- Watch for the reverse transition (enemy â†’ friendly, e.g. duel end)
+        -- Watch for the reverse transition (enemy friendly, e.g. duel end)
         enemyWatchers[u] = CreateEnemyWatcher(u)
     end)
     return watcher
@@ -4196,7 +4281,7 @@ CreateEnemyWatcher = function(unit)
     watcher:RegisterUnitEvent("UNIT_FLAGS", unit)
     watcher:SetScript("OnEvent", function(self, event, u)
         if UnitCanAttack("player", u) then return end
-        -- Unit became friendly again â€” tear down enemy plate, restore to pending
+        -- Unit became friendly again tear down enemy plate, restore to pending
         self:UnregisterAllEvents()
         enemyWatchers[u] = nil
         local plate = ns.plates[u]
@@ -4223,7 +4308,7 @@ CreateEnemyWatcher = function(unit)
     return watcher
 end
 
--- Single shared UNIT_FACTION handler â€” avoids N watchers each registering
+-- Single shared UNIT_FACTION handler avoids N watchers each registering
 -- the global event.  Dispatches to the correct watcher's OnEvent handler.
 -- Only active in the open world (duels can't happen in instanced content).
 local factionFrame = CreateFrame("Frame")
@@ -4242,10 +4327,16 @@ local function UpdateFactionFrameForZone()
 end
 
 factionFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+factionFrame:RegisterEvent("ROLE_CHANGED_INFORM")
+factionFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
 factionFrame:SetScript("OnEvent", function(_, event, unit)
-    if event == "PLAYER_ENTERING_WORLD" then
+    if event == "PLAYER_ENTERING_WORLD"
+    or event == "ROLE_CHANGED_INFORM"
+    or event == "GROUP_ROSTER_UPDATE" then
         RefreshThreatCache()
-        UpdateFactionFrameForZone()
+        if event == "PLAYER_ENTERING_WORLD" then
+            UpdateFactionFrameForZone()
+        end
         return
     end
     -- UNIT_FACTION dispatch
@@ -4317,7 +4408,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
             -- Hide NPC health bars in name-only mode (show name only)
             if ns.TrySuppressNPCHealthBar then ns.TrySuppressNPCHealthBar(unit, nameplate) end
             -- Ensure the Blizzard UF is visible for name-only friendly plates.
-            -- Nameplate frames are recycled â€” a UF previously used for an enemy
+            -- Nameplate frames are recycled a UF previously used for an enemy
             -- may still have alpha 0 or children parented offscreen.
             local db = EllesmereUINameplatesDB or defaults
             if db.friendlyNameOnly ~= false then
@@ -4363,6 +4454,7 @@ manager:SetScript("OnEvent", function(self, event, unit)
         local nameplate = C_NamePlate.GetNamePlateForUnit(unit)
         if nameplate then
             RestoreBlizzardFrame(nameplate)
+            importantDebuffCache[nameplate] = nil
         end
         -- Restore NPC name color if we tinted it
         if nameplate and ns.RestoreFriendlyNPCNameColor then
@@ -4587,6 +4679,7 @@ do
 
     -- Expose for calling from OnEnable (login time)
     ns._ApplySpecPresetFromDB = ApplySpecPresetFromDB
+    _G._ENP_RefreshAllSettings = function() if ns.RefreshAllSettings then ns.RefreshAllSettings() end end
 end
 
 local npAddon = EllesmereUI.Lite.NewAddon("EllesmereUINameplatesInit")

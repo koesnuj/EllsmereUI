@@ -1,7 +1,7 @@
 -------------------------------------------------------------------------------
 --  EUI_Nameplates_Options.lua
 --  Registers the Nameplates module with EllesmereUI
---  Pure UI migration â€“ all get/set calls go to EllesmereUINameplatesDB,
+--  Pure UI migration all get/set calls go to EllesmereUINameplatesDB,
 --  same keys, same defaults, same refresh functions as the AceConfig version.
 --  Does NOT touch nameplate rendering logic.
 -------------------------------------------------------------------------------
@@ -63,7 +63,7 @@ initFrame:SetScript("OnEvent", function(self)
     local floor = math.floor
 
     ---------------------------------------------------------------------------
-    --  DB helper â€“ always reads live EllesmereUINameplatesDB
+    --  DB helper always reads live EllesmereUINameplatesDB
     ---------------------------------------------------------------------------
     local function DB()
         return EllesmereUINameplatesDB
@@ -155,7 +155,7 @@ initFrame:SetScript("OnEvent", function(self)
     --  Live Preview System
     --
     --  A cosmetic-only enemy nameplate preview built from persistent frames.
-    --  Created once, updated via :Update() â€” no rebuilding, no GC pressure.
+    --  Created once, updated via :Update() no rebuilding, no GC pressure.
     --  Reads current DB settings for colors, sizes, font, health number, etc.
     ---------------------------------------------------------------------------
     local activePreview
@@ -180,7 +180,7 @@ initFrame:SetScript("OnEvent", function(self)
     local _sliderDragShowRaidMarker = false
     local _sliderDragShowClassification = false
 
-    -- Persistent random preview values â€” regenerated only on tab switch, NOT on
+    -- Persistent random preview values regenerated only on tab switch, NOT on
     -- profile changes or setting tweaks (which trigger fast-path RefreshPage rebuilds).
     local _previewHpPct
     local _previewCastFill
@@ -188,7 +188,7 @@ initFrame:SetScript("OnEvent", function(self)
     local displayCastIcons = { 136197, 236802, 135808, 136116, 135735, 136048, 135812, 136075 }
     local function RandomizePreviewValues()
         _previewHpPct = math.floor(60 + math.random() * 15)
-        _previewCastFill = 0.40 + math.random() * 0.50
+        _previewCastFill = 0.40 + math.random() * 0.20
         _previewCastIconIdx = math.random(#displayCastIcons)
     end
 
@@ -206,7 +206,7 @@ initFrame:SetScript("OnEvent", function(self)
     --- @param parentW number  available width
     --- @return number height consumed
     --- Build the nameplate preview in the content header area.
-    --- Exact 1:1 replica of a real enemy nameplate â€” same pixel sizes,
+    --- Exact 1:1 replica of a real enemy nameplate same pixel sizes,
     --- same anchors, same fonts, same borders. No glow, no added effects.
     --- @param parent  Frame   contentHeaderFrame
     --- @param parentW number  available width
@@ -219,7 +219,7 @@ initFrame:SetScript("OnEvent", function(self)
         local BORDER_CORNER = 6
         local BORDER_TEX = "Interface\\AddOns\\EllesmereUINameplates\\Media\\border-colorless.png"
 
-        -- Container â€” sized in Update()
+        -- Container sized in Update()
         local pf = CreateFrame("Frame", nil, parent)
         pf:SetPoint("TOP", parent, "TOP", 0, 0)
 
@@ -252,7 +252,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- Icon textures whose insets (px, -px) need refreshing when scale changes
         local _insetIcons = {}
 
-        -- 1px black border helper â€“ uses Snap() for the preview's effective scale
+        -- 1px black border helper uses Snap() for the preview's effective scale
         -- (not PixelUtil, which snaps to screen pixels and can disagree with
         -- the preview's own pixel grid at certain panel scales)
         -- Returns a refresh function that re-snaps the 1px sizes when scale changes.
@@ -282,7 +282,7 @@ initFrame:SetScript("OnEvent", function(self)
             if tex.SetSnapToPixelGrid then tex:SetSnapToPixelGrid(false); tex:SetTexelSnappingBias(0) end
         end
 
-        -- Health bar â€” the central anchor for everything
+        -- Health bar the central anchor for everything
         local health = CreateFrame("StatusBar", nil, pf)
         health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
         UnsnapTex(health:GetStatusBarTexture())
@@ -320,7 +320,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local BORDER_TEX_SIMPLE = "Interface\\AddOns\\EllesmereUINameplates\\Media\\border-simple.png"
 
-        -- Wrapper frame around the health bar â€” a plain Frame (not StatusBar).
+        -- Wrapper frame around the health bar a plain Frame (not StatusBar).
         -- The image border is parented to this wrapper so it never interacts
         -- with StatusBar internals.  Sized to match the health bar exactly.
         local healthWrapper = CreateFrame("Frame", nil, pf)
@@ -345,7 +345,7 @@ initFrame:SetScript("OnEvent", function(self)
                 f._texs[#f._texs + 1] = t
                 return t
             end
-            -- Corners â€” inset UV by half a texel (T) from texture edges (0.0 and 1.0)
+            -- Corners inset UV by half a texel (T) from texture edges (0.0 and 1.0)
             -- so the GPU fully samples the outermost solid pixel line.
             local T = 0.042
             local function UnsnapAfter(t)
@@ -471,7 +471,7 @@ initFrame:SetScript("OnEvent", function(self)
         arrows.right:Hide()
         pf._arrows = arrows  -- expose for Update resizing
 
-        -- Classification icon (elite dragon) â€” shown when transient toggle is on
+        -- Classification icon (elite dragon) shown when transient toggle is on
         local classIcon = pf:CreateTexture(nil, "OVERLAY")
         classIcon:SetTexture("Interface\\AddOns\\EllesmereUI\\media\\elite-rare-indicator.png")
         classIcon:SetSize(24, 24)
@@ -530,7 +530,7 @@ initFrame:SetScript("OnEvent", function(self)
         castParts.targetFS:SetMaxLines(1)
         castParts.targetFS:SetText(UnitName("player") or "Spell Target")
 
-        -- Class power pips (cosmetic preview â€” queries live class/spec resource count)
+        -- Class power pips (cosmetic preview queries live class/spec resource count)
         -- Packed into a single table to stay under Lua's 60-upvalue limit.
         local CP = {
             PIP_W = 8, PIP_H = 3, PIP_GAP = 2,
@@ -590,8 +590,8 @@ initFrame:SetScript("OnEvent", function(self)
         -- Debuffs: 2 icons centered above name
         local debuffs = {}
         local debuffData = {
-            { icon = 136207, text = "8",  dur = 12, elapsed = 4, stacks = 3 },  -- SW:P  (12s total, 4s elapsed â†’ 8s left, 3 stacks)
-            { icon = 135978, text = "14", dur = 18, elapsed = 4, stacks = 0 },  -- VT    (18s total, 4s elapsed â†’ 14s left)
+            { icon = 136207, text = "8",  dur = 12, elapsed = 4, stacks = 3 },  -- SW:P  (12s total, 4s elapsed 8s left, 3 stacks)
+            { icon = 135978, text = "14", dur = 18, elapsed = 4, stacks = 0 },  -- VT    (18s total, 4s elapsed 14s left)
         }
         for i = 1, PV_CONST.DEBUFF_COUNT do
             local d = CreateFrame("Frame", nil, pf)
@@ -694,7 +694,7 @@ initFrame:SetScript("OnEvent", function(self)
         local _cachedRawBarW, _cachedXOff
 
         -------------------------------------------------------------------
-        --  Update â€” re-reads DB, applies to existing frames. No rebuilds.
+        --  Update re-reads DB, applies to existing frames. No rebuilds.
         -------------------------------------------------------------------
         pf.Update = function(self)
             local fontPath   = (EllesmereUI and EllesmereUI.GetFontPath and EllesmereUI.GetFontPath("nameplates")) or DBVal("font")
@@ -827,7 +827,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if pf._raidOverlay then pf._raidOverlay:Show() end
             end
 
-            -- Classification icon (elite dragon) â€” slot-based
+            -- Classification icon (elite dragon) slot-based
             classIcon:ClearAllPoints()
             local clXOff, clYOff = 0, 0
             if clPos ~= "none" then
@@ -858,7 +858,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if pf._classOverlay then pf._classOverlay:Show() end
             end
 
-            -- Arrow push is no longer used â€” arrows are placed OUTSIDE auras now
+            -- Arrow push is no longer used arrows are placed OUTSIDE auras now
             -- (arrow positioning happens after all auras are placed)
 
             -- Cast bar: full health bar width, icon hangs outside left edge
@@ -886,7 +886,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Name font + color + position (font size set per-slot below)
             local nameYOff = DBVal("nameYOffset") or defaults.nameYOffset
 
-            -- â”€â”€ Slot-based text positioning â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            -- Slot-based text positioning 
             -- Read slot assignments
             local slotTop    = DBVal("textSlotTop") or defaults.textSlotTop
             local slotRight  = DBVal("textSlotRight") or defaults.textSlotRight
@@ -1285,7 +1285,7 @@ initFrame:SetScript("OnEvent", function(self)
                 if pf._arrowOverlay then pf._arrowOverlay:Hide() end
             end
 
-            -- Height calculation â€” "top" slot determines the area above the name
+            -- Height calculation "top" slot determines the area above the name
             -- Find which aura type is in the "top" slot for height,
             -- including per-slot Y offsets that push elements further up.
             local topExtent = 0
@@ -1764,11 +1764,12 @@ initFrame:SetScript("OnEvent", function(self)
                 if v then DB().friendlyShowDefaultNames = false end
                 if SetCVar then
                     pcall(SetCVar, "nameplateShowFriendlyPlayers", v and 1 or 0)
-                    pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", v and 1 or 0)
-                    pcall(SetCVar, "UnitNameFriendlyPlayerName", v and 1 or 0)
                     pcall(SetCVar, "nameplateShowFriends", v and 1 or 0)
                 end
                 if ns.UpdateFriendlyNameplateSystem then ns.UpdateFriendlyNameplateSystem() end
+                -- Re-assert stacking after friendly CVar changes, since Blizzard
+                -- can reset the stacking bitfield as a side effect.
+                ns.RefreshStackingMotion()
                 EllesmereUI:RefreshPage()
               end },
             { type="toggle", text="Make Friendly Nameplates Name Only",
@@ -1874,7 +1875,7 @@ initFrame:SetScript("OnEvent", function(self)
                     t3:SetPoint("TOPLEFT", pf, "TOPLEFT", SLIDER_LEFT, r3Y - 2)
                     v3:ClearAllPoints(); v3:SetPoint("TOPRIGHT", pf, "TOPRIGHT", -SIDE_PAD, r3Y)
 
-                    -- Row 4: Show Health Percent (toggle â€” inverted from friendlyHideHealthText)
+                    -- Row 4: Show Health Percent (toggle inverted from friendlyHideHealthText)
                     local r4Y = r3Y - ROW_H - GAP
                     local lbl4 = MakeFont(pf, 11, nil, 1, 1, 1); lbl4:SetAlpha(0.6)
                     lbl4:SetText("Show Health Percent"); lbl4:SetPoint("TOPLEFT", pf, "TOPLEFT", SIDE_PAD, r4Y)
@@ -1950,7 +1951,6 @@ initFrame:SetScript("OnEvent", function(self)
                             DB().showFriendlyPlayers = false
                             if SetCVar then
                                 pcall(SetCVar, "nameplateShowFriendlyPlayers", 0)
-                                pcall(SetCVar, "nameplateShowFriendlyPlayerUnits", 0)
                                 pcall(SetCVar, "nameplateShowFriends", 0)
                                 pcall(SetCVar, "UnitNameFriendlyPlayerName", 1)
                             end
@@ -2255,6 +2255,13 @@ initFrame:SetScript("OnEvent", function(self)
         _, h = W:SectionHeader(parent, SECTION_ENEMY_NP, y);  y = y - h
 
         _, h = W:DualRow(parent, y,
+            { type="toggle", text="Enable Stacking Nameplates",
+              getValue=function() return DBVal("stackingEnabled") ~= false end,
+              setValue=function(v)
+                DB().stackingEnabled = v
+                ns.RefreshStackingMotion()
+              end,
+              tooltip="When enabled, nameplates stack vertically instead of overlapping." },
             { type="slider", text="Stacked Nameplate Spacing",
               trackWidth=130,
               min=50, max=200, step=5,
@@ -2263,15 +2270,27 @@ initFrame:SetScript("OnEvent", function(self)
                 DB().stackSpacingScale = v
                 ns.RefreshStackingBounds()
               end,
-              tooltip="Adjusts the vertical spacing between stacked nameplates. 100% = default, lower = tighter, higher = more spread." },
-            { type="slider", text="Nameplate Distance from Enemy",
-              trackWidth=110,
-              min=-50, max=50, step=1,
-              getValue=function() return DBVal("nameplateYOffset") or defaults.nameplateYOffset end,
+              tooltip="Adjusts the vertical spacing between stacked nameplates. 100% = default, lower = tighter, higher = more spread." });  y = y - h
+
+        _, h = W:DualRow(parent, y,
+            { type="slider", text="Hitbox Size X",
+              trackWidth=130,
+              min=50, max=250, step=5,
+              getValue=function() return DBVal("hitboxScaleX") or defaults.hitboxScaleX end,
               setValue=function(v)
-                DB().nameplateYOffset = v
-                ns.RefreshNameplateYOffset()
-              end });  y = y - h
+                DB().hitboxScaleX = v
+                ns.RefreshHitboxSize()
+              end,
+              tooltip="Widens the clickable hitbox of enemy nameplates. 100% = matches bar width. Increase to make nameplates easier to click." },
+            { type="slider", text="Hitbox Size Y",
+              trackWidth=130,
+              min=50, max=250, step=5,
+              getValue=function() return DBVal("hitboxScaleY") or defaults.hitboxScaleY end,
+              setValue=function(v)
+                DB().hitboxScaleY = v
+                ns.RefreshHitboxSize()
+              end,
+              tooltip="Increases the clickable hitbox height of enemy nameplates. 100% = matches bar height. Increase to make nameplates easier to click." });  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
 
@@ -2796,7 +2815,7 @@ initFrame:SetScript("OnEvent", function(self)
         -----------------------------------------------------------------------
         local slotKeys = { "debuffSlot", "buffSlot", "ccSlot", "raidMarkerPos", "classificationSlot" }
 
-        -- Inverted mapping: position â†’ element (for CORE POSITIONS dropdowns)
+        -- Inverted mapping: position element (for CORE POSITIONS dropdowns)
         local elementToKey = {
             debuffs        = "debuffSlot",
             buffs          = "buffSlot",
@@ -3044,6 +3063,13 @@ initFrame:SetScript("OnEvent", function(self)
             eyeBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
         end
 
+        local function RefreshAllTextures()
+            ns.RefreshAllSettings()
+            for _, plate in pairs(ns.friendlyPlates or {}) do
+                if ns.ApplyHealthBarTexture then ns.ApplyHealthBarTexture(plate) end
+            end
+        end
+
         local borderStyleRow
         borderStyleRow, h = W:DualRow(parent, y,
             { type="dropdown", text="Border Style",
@@ -3098,13 +3124,6 @@ initFrame:SetScript("OnEvent", function(self)
             local off = isBorderNone()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
-        end
-
-        local function RefreshAllTextures()
-            ns.RefreshAllSettings()
-            for _, plate in pairs(ns.friendlyPlates or {}) do
-                if ns.ApplyHealthBarTexture then ns.ApplyHealthBarTexture(plate) end
-            end
         end
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -3182,7 +3201,7 @@ initFrame:SetScript("OnEvent", function(self)
         local COGS_ICON = EllesmereUI.COGS_ICON
 
         -- opts = { title, xGet, xSet, yGet, ySet, sizeGet, sizeSet, sizeMin, sizeMax, sizeStep, sizeLabel }
-        -- sizeGet may be nil â†’ no size row shown
+        -- sizeGet may be nil no size row shown
         local function ShowCogPopup(anchorBtn, opts)
             if not cogPopup then
                 local SolidTex = EllesmereUI.SolidTex
@@ -3908,7 +3927,7 @@ initFrame:SetScript("OnEvent", function(self)
 
         local healthBarHeightRow
         healthBarHeightRow, h = W:DualRow(parent, y,
-            { type="slider", text="Health Bar Width", min=BAR_W, max=BAR_W+50, step=1,
+            { type="slider", text="Health Bar Width", min=BAR_W, max=BAR_W+100, step=1,
               getValue=function() return BAR_W + DBVal("healthBarWidth") end,
               setValue=function(v)
                 local extra = v - BAR_W
@@ -3919,13 +3938,15 @@ initFrame:SetScript("OnEvent", function(self)
                     PP.Width(plate.cast, v)
                     plate:UpdateNameWidth()
                 end
+                if ns.ApplyNamePlateClickArea then ns.ApplyNamePlateClickArea() end
                 UpdatePreview()
               end },
-            { type="slider", text="Health Bar Height", min=6, max=24, step=1,
+            { type="slider", text="Health Bar Height", min=6, max=30, step=1,
               getValue=function() return DBVal("healthBarHeight") end,
               setValue=function(v)
                 DB().healthBarHeight = v
                 for _, plate in pairs(plates) do PP.Height(plate.health, v) end
+                if ns.ApplyNamePlateClickArea then ns.ApplyNamePlateClickArea() end
                 UpdatePreview()
               end });  y = y - h
 
@@ -4030,65 +4051,60 @@ initFrame:SetScript("OnEvent", function(self)
                 ns.ApplyClassPowerSetting(); UpdatePreview()
                 EllesmereUI:RefreshPage()
               end },
-            { type="toggle", text="Class Colored",
+            { type="multiSwatch", text="Fill Color",
               disabled=classPowerDisabled,
               disabledTooltip="Show Class Resource",
-              getValue=function()
-                local v = DBVal("classPowerClassColors")
-                if v == nil then return defaults.classPowerClassColors end
-                return v
-              end,
-              setValue=function(v)
-                DB().classPowerClassColors = v
-                ns.RefreshClassPower(); UpdatePreview()
-                EllesmereUI:RefreshPage()
-              end });  y = y - h
-
-        -- Inline color swatch on Class Colors toggle (disabled when class colors is active)
-        do
-            local rightRgn = classResourceToggleRow._rightRegion
-
-            local cpColorGet = function()
-                local c = (DB() and DB().classPowerCustomColor) or defaults.classPowerCustomColor
-                return c.r, c.g, c.b
-            end
-            local cpColorSet = function(r, g, b)
-                DB().classPowerCustomColor = { r = r, g = g, b = b }
-                ns.RefreshClassPower(); UpdatePreview()
-            end
-            local cpSwatch, cpUpdateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, cpColorGet, cpColorSet, nil, 20)
-            PP.Point(cpSwatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
-            rightRgn._lastInline = cpSwatch
-
-            -- Swatch is disabled (grayed out) when class colors toggle is ON or when Show Class Resource is off
-            local function cpSwatchDisabled()
-                if classPowerDisabled() then return true end
-                local v = DBVal("classPowerClassColors")
-                if v == nil then return defaults.classPowerClassColors end
-                return v
-            end
-
-            -- Blocking overlay for disabled state
-            local cpBlock = CreateFrame("Frame", nil, cpSwatch)
-            cpBlock:SetAllPoints()
-            cpBlock:SetFrameLevel(cpSwatch:GetFrameLevel() + 10)
-            cpBlock:EnableMouse(true)
-            cpBlock:SetScript("OnEnter", function()
-                local reason = classPowerDisabled() and "Show Class Resource" or "Class Colored"
-                EllesmereUI.ShowWidgetTooltip(cpSwatch, EllesmereUI.DisabledTooltip(reason))
-            end)
-            cpBlock:SetScript("OnLeave", function() EllesmereUI.HideWidgetTooltip() end)
-
-            EllesmereUI.RegisterWidgetRefresh(function()
-                local off = cpSwatchDisabled()
-                cpSwatch:SetAlpha(off and 0.3 or 1)
-                if off then cpBlock:Show() else cpBlock:Hide() end
-                cpUpdateSwatch()
-            end)
-            local cpSwatchOff = cpSwatchDisabled()
-            cpSwatch:SetAlpha(cpSwatchOff and 0.3 or 1)
-            if cpSwatchOff then cpBlock:Show() else cpBlock:Hide() end
-        end
+              swatches = {
+                { tooltip = "Custom Color",
+                  disabled = classPowerDisabled,
+                  disabledTooltip = "Show Class Resource",
+                  getValue = function()
+                      local c = (DB() and DB().classPowerCustomColor) or defaults.classPowerCustomColor
+                      return c.r, c.g, c.b
+                  end,
+                  setValue = function(r, g, b)
+                      DB().classPowerCustomColor = { r = r, g = g, b = b }
+                      ns.RefreshClassPower(); UpdatePreview()
+                  end,
+                  onClick = function(self)
+                      local v = DBVal("classPowerClassColors")
+                      if v == nil then v = defaults.classPowerClassColors end
+                      if v then
+                          DB().classPowerClassColors = false
+                          ns.RefreshClassPower(); UpdatePreview()
+                          EllesmereUI:RefreshPage()
+                          return
+                      end
+                      if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                      local v = DBVal("classPowerClassColors")
+                      if v == nil then v = defaults.classPowerClassColors end
+                      return v and 0.3 or 1
+                  end },
+                { tooltip = "Class Colored",
+                  disabled = classPowerDisabled,
+                  disabledTooltip = "Show Class Resource",
+                  getValue = function()
+                      local _, ct = UnitClass("player")
+                      if ct and RAID_CLASS_COLORS[ct] then
+                          local cc = RAID_CLASS_COLORS[ct]
+                          return cc.r, cc.g, cc.b, 1
+                      end
+                      return 1, 1, 1, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                      DB().classPowerClassColors = true
+                      ns.RefreshClassPower(); UpdatePreview()
+                      EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                      local v = DBVal("classPowerClassColors")
+                      if v == nil then v = defaults.classPowerClassColors end
+                      return v and 1 or 0.3
+                  end },
+              } });  y = y - h
 
         -- Row 2: Position (with inline cog for X/Y) | Size
         local classResourceRow2
@@ -4349,21 +4365,57 @@ initFrame:SetScript("OnEvent", function(self)
                 end
                 UpdatePreview()
               end },
-            { type="colorpicker", text="Spell Target",
-              disabled=function()
-                local db = DB()
-                if db and db.castTargetClassColor ~= nil then return db.castTargetClassColor end
-                return defaults.castTargetClassColor
-              end,
-              disabledTooltip="Class Colored is enabled in Spell Target Settings",
-              getValue=function() return DBColor("castTargetColor") end,
-              setValue=function(r, g, b)
-                DB().castTargetColor = { r = r, g = g, b = b }
-                for _, plate in pairs(plates) do
-                    plate:UpdateHealth()
-                end
-                UpdatePreview()
-              end })
+            { type="multiSwatch", text="Spell Target",
+              swatches = {
+                { tooltip = "Custom Color",
+                  getValue=function() return DBColor("castTargetColor") end,
+                  setValue=function(r, g, b)
+                    DB().castTargetColor = { r = r, g = g, b = b }
+                    for _, plate in pairs(plates) do
+                        plate:UpdateHealth()
+                    end
+                    UpdatePreview()
+                  end,
+                  onClick = function(self)
+                    local db = DB()
+                    if db.castTargetClassColor ~= nil and db.castTargetClassColor or defaults.castTargetClassColor then
+                        DB().castTargetClassColor = false
+                        for _, plate in pairs(plates) do plate:UpdateHealth() end
+                        UpdatePreview()
+                        EllesmereUI:RefreshPage()
+                        return
+                    end
+                    if self._eabOrigClick then self._eabOrigClick(self) end
+                  end,
+                  refreshAlpha = function()
+                    local db = DB()
+                    local cc = db and db.castTargetClassColor
+                    if cc == nil then cc = defaults.castTargetClassColor end
+                    return cc and 0.3 or 1
+                  end },
+                { tooltip = "Class Colored",
+                  getValue = function()
+                    local _, ct = UnitClass("player")
+                    if ct and RAID_CLASS_COLORS[ct] then
+                        local cc = RAID_CLASS_COLORS[ct]
+                        return cc.r, cc.g, cc.b, 1
+                    end
+                    return 1, 1, 1, 1
+                  end,
+                  setValue = function() end,
+                  onClick = function()
+                    DB().castTargetClassColor = true
+                    for _, plate in pairs(plates) do plate:UpdateHealth() end
+                    UpdatePreview()
+                    EllesmereUI:RefreshPage()
+                  end,
+                  refreshAlpha = function()
+                    local db = DB()
+                    local cc = db and db.castTargetClassColor
+                    if cc == nil then cc = defaults.castTargetClassColor end
+                    return cc and 1 or 0.3
+                  end },
+              } })
         do
             -- LEFT: Spell Name cog for size
             local leftRgn = spellNameRow._leftRegion
@@ -4394,7 +4446,7 @@ initFrame:SetScript("OnEvent", function(self)
             spellNameCogBtn:SetScript("OnLeave", function(self) self:SetAlpha(0.4) end)
             spellNameCogBtn:SetScript("OnClick", function(self) spellNameCogShow(self) end)
 
-            -- RIGHT: Spell Target cog for size + class colored
+            -- RIGHT: Spell Target cog for size
             local rightRgn = spellNameRow._rightRegion
             local _, spellTargetCogShow = EllesmereUI.BuildCogPopup({
                 title = "Spell Target Settings",
@@ -4407,20 +4459,6 @@ initFrame:SetScript("OnEvent", function(self)
                             if plate.castTarget then SetFSFont(plate.castTarget, v, GetNPOutline()) end
                         end
                         UpdatePreview()
-                      end },
-                    { type="toggle", label="Class Colored",
-                      get=function()
-                        local db = DB()
-                        if db and db.castTargetClassColor ~= nil then return db.castTargetClassColor end
-                        return defaults.castTargetClassColor
-                      end,
-                      set=function(v)
-                        DB().castTargetClassColor = v
-                        for _, plate in pairs(plates) do
-                            plate:UpdateHealth()
-                        end
-                        UpdatePreview()
-                        EllesmereUI:RefreshPage()
                       end },
                 },
             })
@@ -4521,7 +4559,7 @@ initFrame:SetScript("OnEvent", function(self)
             return nil
         end
 
-        -- Resolve a dynamic click mapping for icon elements â†’ Core Positions row
+        -- Resolve a dynamic click mapping for icon elements Core Positions row
         local function ResolveCoreMapping(element)
             local pos = FindCorePosForElement(element)
             if not pos then return { section = coreHeader, target = coreRow1 } end
@@ -4530,7 +4568,7 @@ initFrame:SetScript("OnEvent", function(self)
             return { section = coreHeader, target = info.row, slotSide = (info.side == "_leftRegion") and "left" or "right" }
         end
 
-        -- Resolve a dynamic click mapping for text elements â†’ Core Text Positions row
+        -- Resolve a dynamic click mapping for text elements Core Text Positions row
         local function ResolveTextMapping(element)
             local slotKey = FindTextSlotForElement(element)
             if not slotKey then return { section = coreTextHeader, target = textRow1 } end
@@ -4626,8 +4664,8 @@ initFrame:SetScript("OnEvent", function(self)
 
         -- Hit overlay factory for preview elements
         -- opts (optional table):
-        --   hlAnchor     = frame â†’ draw highlight around this frame instead of btn
-        --   hlBehindText = true  â†’ draw highlight on a child frame at icon level + 1
+        --   hlAnchor     = frame draw highlight around this frame instead of btn
+        --   hlBehindText = true  draw highlight on a child frame at icon level + 1
         --                          (text lives on a child frame at icon level + 2)
         local function SnapPreview(val)
             local s = activePreview and activePreview:GetEffectiveScale() or 1
@@ -4670,40 +4708,29 @@ initFrame:SetScript("OnEvent", function(self)
             end
             btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
             btn:RegisterForClicks("LeftButtonDown")
-            -- Pixel-perfect accent border highlight
             local c = EllesmereUI.ELLESMERE_GREEN
-            -- When hlBehindText is set, create a dedicated highlight child frame
-            -- at icon level + 1 (between icon artwork and the text child frame at +2).
-            -- Frame-level ordering is reliable; no sublevel tricks needed.
+            local PP = EllesmereUI.PP
+            -- When hlBehindText is set, attach the border to a dedicated child frame
+            -- at icon level + 1 so it sits between the icon artwork and text layers.
+            -- Always use a child container so the hover border doesn't conflict
+            -- with any existing PP border on the target frame.
             local behindText = opts and opts.hlBehindText
-            local hlParent, hlAnchorFrame
+            local hlBase
             if behindText then
                 local hlFrame = CreateFrame("Frame", nil, element)
                 hlFrame:SetAllPoints()
                 hlFrame:SetFrameLevel(element:GetFrameLevel() + 1)
-                hlParent = hlFrame
-                hlAnchorFrame = element
+                hlBase = hlFrame
             else
-                hlParent = btn
-                hlAnchorFrame = (opts and opts.hlAnchor) or btn
+                hlBase = (opts and opts.hlAnchor) or btn
             end
-            local function MkHL()
-                local t = hlParent:CreateTexture(nil, "OVERLAY", nil, 7)
-                t:SetColorTexture(c.r, c.g, c.b, 1)
-                if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                return t
-            end
-            local hlPx = SnapPreview(2)
-            local ht = MkHL(); ht:SetHeight(hlPx); ht:SetPoint("TOPLEFT", hlAnchorFrame, "TOPLEFT"); ht:SetPoint("TOPRIGHT", hlAnchorFrame, "TOPRIGHT")
-            local hb = MkHL(); hb:SetHeight(hlPx); hb:SetPoint("BOTTOMLEFT", hlAnchorFrame, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", hlAnchorFrame, "BOTTOMRIGHT")
-            local hl = MkHL(); hl:SetWidth(hlPx); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-            local hr = MkHL(); hr:SetWidth(hlPx); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-            btn._hlTextures = { ht, hb, hl, hr }
-            local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-            local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-            HideHL()
-            btn:SetScript("OnEnter", function() ShowHL() end)
-            btn:SetScript("OnLeave", function() HideHL() end)
+            local hlCont = CreateFrame("Frame", nil, hlBase)
+            hlCont:SetAllPoints()
+            hlCont:SetFrameLevel(hlBase:GetFrameLevel() + 1)
+            local brd = PP.CreateBorder(hlCont, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+            brd:Hide()
+            btn:SetScript("OnEnter", function() brd:Show() end)
+            btn:SetScript("OnLeave", function() brd:Hide() end)
             btn:SetScript("OnMouseDown", function() NavigateToSetting(mappingKey) end)
             return btn
         end
@@ -4755,7 +4782,7 @@ initFrame:SetScript("OnEvent", function(self)
                     end
                 end
             end
-            -- Cast icon overlay (separate from cast bar â€” navigates to Show Spell Icon row)
+            -- Cast icon overlay (separate from cast bar navigates to Show Spell Icon row)
             local castOverlayLevel
             if pv._cast then
                 castOverlayLevel = pv._cast:GetFrameLevel() + 20
@@ -4766,23 +4793,10 @@ initFrame:SetScript("OnEvent", function(self)
                     iconOv:SetAllPoints(pv._castIconFrame)
                     iconOv:SetFrameLevel(castOverlayLevel)
                     iconOv:RegisterForClicks("LeftButtonDown")
-                    local function MkIOHL()
-                        local t = iconOv:CreateTexture(nil, "OVERLAY", nil, 7)
-                        t:SetColorTexture(cc.r, cc.g, cc.b, 1)
-                        if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                        return t
-                    end
-                    local ioPx = SnapPreview(2)
-                    local it = MkIOHL(); it:SetHeight(ioPx); it:SetPoint("TOPLEFT"); it:SetPoint("TOPRIGHT")
-                    local ib = MkIOHL(); ib:SetHeight(ioPx); ib:SetPoint("BOTTOMLEFT"); ib:SetPoint("BOTTOMRIGHT")
-                    local il = MkIOHL(); il:SetWidth(ioPx); il:SetPoint("TOPLEFT", it, "BOTTOMLEFT"); il:SetPoint("BOTTOMLEFT", ib, "TOPLEFT")
-                    local ir = MkIOHL(); ir:SetWidth(ioPx); ir:SetPoint("TOPRIGHT", it, "BOTTOMRIGHT"); ir:SetPoint("BOTTOMRIGHT", ib, "TOPRIGHT")
-                    iconOv._hlTextures = { it, ib, il, ir }
-                    local function ShowIOHL() for _, t in ipairs(iconOv._hlTextures) do t:Show() end end
-                    local function HideIOHL() for _, t in ipairs(iconOv._hlTextures) do t:Hide() end end
-                    HideIOHL()
-                    iconOv:SetScript("OnEnter", function() ShowIOHL() end)
-                    iconOv:SetScript("OnLeave", function() HideIOHL() end)
+                    local ioBrd = EllesmereUI.PP.CreateBorder(iconOv, cc.r, cc.g, cc.b, 1, 2, "OVERLAY", 7)
+                    ioBrd:Hide()
+                    iconOv:SetScript("OnEnter", function() ioBrd:Show() end)
+                    iconOv:SetScript("OnLeave", function() ioBrd:Hide() end)
                     iconOv:SetScript("OnMouseDown", function() NavigateToSetting("castIcon") end)
                 end
                 -- Cast bar overlay (bar only, not icon)
@@ -4790,23 +4804,10 @@ initFrame:SetScript("OnEvent", function(self)
                 castOverlay:SetAllPoints(pv._cast)
                 castOverlay:SetFrameLevel(castOverlayLevel)
                 castOverlay:RegisterForClicks("LeftButtonDown")
-                local function MkCHL()
-                    local t = castOverlay:CreateTexture(nil, "OVERLAY", nil, 7)
-                    t:SetColorTexture(cc.r, cc.g, cc.b, 1)
-                    if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-                    return t
-                end
-                local coPx = SnapPreview(2)
-                local ct = MkCHL(); ct:SetHeight(coPx); ct:SetPoint("TOPLEFT"); ct:SetPoint("TOPRIGHT")
-                local cb = MkCHL(); cb:SetHeight(coPx); cb:SetPoint("BOTTOMLEFT"); cb:SetPoint("BOTTOMRIGHT")
-                local cl = MkCHL(); cl:SetWidth(coPx); cl:SetPoint("TOPLEFT", ct, "BOTTOMLEFT"); cl:SetPoint("BOTTOMLEFT", cb, "TOPLEFT")
-                local cr = MkCHL(); cr:SetWidth(coPx); cr:SetPoint("TOPRIGHT", ct, "BOTTOMRIGHT"); cr:SetPoint("BOTTOMRIGHT", cb, "TOPRIGHT")
-                castOverlay._hlTextures = { ct, cb, cl, cr }
-                local function ShowCHL() for _, t in ipairs(castOverlay._hlTextures) do t:Show() end end
-                local function HideCHL() for _, t in ipairs(castOverlay._hlTextures) do t:Hide() end end
-                HideCHL()
-                castOverlay:SetScript("OnEnter", function() ShowCHL() end)
-                castOverlay:SetScript("OnLeave", function() HideCHL() end)
+                local coBrd = EllesmereUI.PP.CreateBorder(castOverlay, cc.r, cc.g, cc.b, 1, 2, "OVERLAY", 7)
+                coBrd:Hide()
+                castOverlay:SetScript("OnEnter", function() coBrd:Show() end)
+                castOverlay:SetScript("OnLeave", function() coBrd:Hide() end)
                 castOverlay:SetScript("OnMouseDown", function() NavigateToSetting("castBar") end)
             end
             -- Cast spell name and target text (above the cast bar overlay)
@@ -4845,7 +4846,7 @@ initFrame:SetScript("OnEvent", function(self)
                 classOverlay = CreateHitOverlay(pv._classIcon, "classIcon")
                 if not showClassificationPreview then classOverlay:Hide() end
             end
-            -- Class resource pips â€” wrapper button spanning all visible pips
+            -- Class resource pips wrapper button spanning all visible pips
             local cpOverlay
             if pv._cpPips then
                 local firstVis, lastVis
@@ -4898,7 +4899,7 @@ initFrame:SetScript("OnEvent", function(self)
             -- Sync overlay visibility with preview toggles
             pv._raidOverlay = raidOverlay
             pv._classOverlay = classOverlay
-            -- Target arrows â€” wrapper button spanning both arrow textures
+            -- Target arrows wrapper button spanning both arrow textures
             local arrowOverlay
             if pv._arrows then
                 local arrowBtn = CreateFrame("Button", nil, pv)
@@ -4963,14 +4964,14 @@ initFrame:SetScript("OnEvent", function(self)
         return castIconPool[castIconIdx]
     end
 
-    -- Cast fill values: each at least 5% apart, range 40â€“90%
+    -- Cast fill values: each at least 5% apart, range 40 90%
     local castFillUsed = {}
     local function ResetCastFills()
         for i = #castFillUsed, 1, -1 do castFillUsed[i] = nil end
     end
     local function NextCastFill()
         for _ = 1, 50 do
-            local v = 0.40 + math.random() * 0.50
+            local v = 0.40 + math.random() * 0.20
             local ok = true
             for _, prev in ipairs(castFillUsed) do
                 if math.abs(v - prev) < 0.05 then ok = false; break end
@@ -4981,7 +4982,7 @@ initFrame:SetScript("OnEvent", function(self)
             end
         end
         -- fallback if somehow can't find a valid value
-        local v = 0.40 + math.random() * 0.50
+        local v = 0.40 + math.random() * 0.20
         castFillUsed[#castFillUsed + 1] = v
         return v
     end
@@ -5008,21 +5009,13 @@ initFrame:SetScript("OnEvent", function(self)
         container:SetFrameLevel(parentRow:GetFrameLevel() + 2)
 
         -- Simple 1px solid border using the user's nameplate border color.
-        -- Uses two-point anchoring + DisablePixelSnap (same as dropdown borders)
-        -- for pixel-perfect rendering inside the scroll frame.
-        local function DisablePixelSnap(obj)
-            if obj.SetSnapToPixelGrid then
-                obj:SetSnapToPixelGrid(false)
-                obj:SetTexelSnappingBias(0)
-            end
-        end
+        -- Uses two-point anchoring for pixel-perfect rendering inside the scroll frame.
         local function MakePreviewBorder(parent)
             local bc = (DB() and DB().borderColor) or defaults.borderColor
             local edges = {}
             local function mkE()
                 local t = parent:CreateTexture(nil, "OVERLAY", nil, 7)
                 t:SetColorTexture(bc.r, bc.g, bc.b, 1)
-                PP.DisablePixelSnap(t)
                 edges[#edges + 1] = t
                 return t
             end
@@ -5041,17 +5034,15 @@ initFrame:SetScript("OnEvent", function(self)
 
             local health = CreateFrame("StatusBar", nil, container)
             health:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-            PP.DisablePixelSnap(health:GetStatusBarTexture())
             health:SetMinMaxValues(0, 100)
             health:SetValue(healthPct)
             health:SetAllPoints()
 
             local bg = health:CreateTexture(nil, "BACKGROUND")
-            PP.DisablePixelSnap(bg)
             bg:SetAllPoints()
             bg:SetColorTexture(0.20, 0.20, 0.20, 1.0)
 
-            -- 1px solid border â€” on a dedicated frame ABOVE the health StatusBar
+            -- 1px solid border on a dedicated frame ABOVE the health StatusBar
             -- so the border renders on top (child frames cover parent textures).
             -- Parented to container (not health) so it stays at full opacity
             -- when the health bar is dimmed via SetDisabled.
@@ -5221,7 +5212,6 @@ initFrame:SetScript("OnEvent", function(self)
                 local bc = (DB() and DB().borderColor) or defaults.borderColor
                 for _, tex in ipairs(container._brdEdges) do
                     tex:SetColorTexture(bc.r, bc.g, bc.b, 1)
-                    PP.DisablePixelSnap(tex)
                 end
             end
 
@@ -5230,13 +5220,11 @@ initFrame:SetScript("OnEvent", function(self)
 
             local cast = CreateFrame("StatusBar", nil, container)
             cast:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
-            PP.DisablePixelSnap(cast:GetStatusBarTexture())
             cast:SetMinMaxValues(0, 1)
             cast:SetValue(NextCastFill())
             cast:SetAllPoints()
 
             local castBG = cast:CreateTexture(nil, "BACKGROUND")
-            PP.DisablePixelSnap(castBG)
             castBG:SetAllPoints()
             castBG:SetColorTexture(0.20, 0.20, 0.20, 0.9)
 
@@ -5248,7 +5236,7 @@ initFrame:SetScript("OnEvent", function(self)
             spark:SetPoint("CENTER", cast:GetStatusBarTexture(), "RIGHT", 0, 0)
             spark:SetBlendMode("ADD")
 
-            -- Cast icon frame (to the left) â€” no border for Colors tab previews
+            -- Cast icon frame (to the left) no border for Colors tab previews
             local iconFrame = CreateFrame("Frame", nil, cast)
             iconFrame:SetSize(BAR_H + 2, BAR_H + 2)
             iconFrame:SetPoint("RIGHT", cast, "LEFT", 0, 0)
@@ -5439,7 +5427,7 @@ initFrame:SetScript("OnEvent", function(self)
         -- ShuffleCastIcons()  -- disabled: no cast previews on Colors page
         -- ResetCastFills()    -- disabled: no cast previews on Colors page
 
-        --[[ COLOR PRESET SYSTEM (disabled â€” kept for future use)
+        --[[ COLOR PRESET SYSTEM (disabled kept for future use)
         -- Color preset keys
         local colorPresetKeys = {
             "focusColorEnabled", "focus", "focusOverlayTexture", "focusOverlayAlpha", "focusOverlayColor", "caster", "miniboss", "enemyInCombat",
@@ -5645,7 +5633,7 @@ initFrame:SetScript("OnEvent", function(self)
             cogBtn:EnableMouse(not isFocusTextureNone())
         end
 
-        -- Focus preview bar â€” anchored so its right edge aligns with the
+        -- Focus preview bar anchored so its right edge aligns with the
         -- Enable Focus Color toggle's right edge (SIDE_PAD = 20 from region edge).
         -- MakeColorPreviewBar positions the bar at -(20+24+27) = -71 to leave room
         -- for a swatch; we override that to -20 since there's no swatch here.
@@ -5751,11 +5739,16 @@ initFrame:SetScript("OnEvent", function(self)
                   end },
               } });  y = y - h
 
-        -- Row 2: Show Special "Has Aggro" Color (left) ---- blank (right)
+        -- Row 2: Show Special "Has Aggro" Color (left) ---- Classic Tank Aggro (right)
         local function isTankHasAggroDisabled()
             local db = DB()
             if db and db.tankHasAggroEnabled ~= nil then return not db.tankHasAggroEnabled end
             return not defaults.tankHasAggroEnabled
+        end
+        local function isClassicTankAggroDisabled()
+            local db = DB()
+            if db and db.classicTankAggro ~= nil then return not db.classicTankAggro end
+            return not defaults.classicTankAggro
         end
 
         local tankDualFrame
@@ -5772,9 +5765,20 @@ initFrame:SetScript("OnEvent", function(self)
                 RefreshAllPlates()
                 EllesmereUI:RefreshPage()
               end },
-            { type="label", text="" });  y = y - h
+            { type="toggle", text="Classic Tank Aggro",
+              tooltip="Enables a three-tier tank aggro system: has aggro, losing aggro, and no aggro colors override all mob-type colors.",
+              getValue=function()
+                local db = DB()
+                if db and db.classicTankAggro ~= nil then return db.classicTankAggro end
+                return defaults.classicTankAggro
+              end,
+              setValue=function(v)
+                DB().classicTankAggro = v
+                RefreshAllPlates()
+                EllesmereUI:RefreshPage()
+              end });  y = y - h
 
-        -- Inline Tank Has Aggro color swatch next to toggle
+        -- Inline "Has Aggro" color swatch next to left toggle
         do
             local leftRgn = tankDualFrame._leftRegion
             local tankAggroColorGet = function() return DBColor("tankHasAggro") end
@@ -5791,6 +5795,27 @@ initFrame:SetScript("OnEvent", function(self)
                 updateSwatch()
             end)
             local off = isTankHasAggroDisabled()
+            swatch:SetAlpha(off and 0.15 or 1)
+            swatch:EnableMouse(not off)
+        end
+
+        -- Inline "Has Aggro" color swatch next to Classic Tank Aggro toggle
+        do
+            local rightRgn = tankDualFrame._rightRegion
+            local aggroColorGet = function() return DBColor("tankHasAggro") end
+            local aggroColorSet = function(r, g, b)
+                DB().tankHasAggro = { r = r, g = g, b = b }
+                RefreshAllPlates()
+            end
+            local swatch, updateSwatch = EllesmereUI.BuildColorSwatch(rightRgn, rightRgn:GetFrameLevel() + 5, aggroColorGet, aggroColorSet, nil, 20)
+            PP.Point(swatch, "RIGHT", rightRgn._control, "LEFT", -12, 0)
+            EllesmereUI.RegisterWidgetRefresh(function()
+                local off = isClassicTankAggroDisabled()
+                swatch:SetAlpha(off and 0.15 or 1)
+                swatch:EnableMouse(not off)
+                updateSwatch()
+            end)
+            local off = isClassicTankAggroDisabled()
             swatch:SetAlpha(off and 0.15 or 1)
             swatch:EnableMouse(not off)
         end
@@ -5915,7 +5940,7 @@ initFrame:SetScript("OnEvent", function(self)
                 RandomizePreviewValues()
                 -- Refresh the preview after cache restore
                 if activePreview and activePreview.Update then activePreview:Update() end
-                -- Refresh hint visibility â€” never recreate here, just show/hide
+                -- Refresh hint visibility never recreate here, just show/hide
                 local dismissed = IsPreviewHintDismissed()
                 if _previewHintFS then
                     if dismissed then
@@ -5971,7 +5996,7 @@ initFrame:SetScript("OnEvent", function(self)
     })
 
     ---------------------------------------------------------------------------
-    --  Slash command  /enp  â€” opens EllesmereUI to the Nameplates module
+    --  Slash command  /enp  opens EllesmereUI to the Nameplates module
     ---------------------------------------------------------------------------
     SLASH_ELLESMERENAMEPLATES1 = "/enp"
     SlashCmdList.ELLESMERENAMEPLATES = function(msg)

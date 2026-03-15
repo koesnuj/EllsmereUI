@@ -135,12 +135,16 @@ local function DeepMergeDefaults(dest, src)
     end
 end
 
+-- Expose for use by the profile system when applying old snapshots
+EUILite.DeepMergeDefaults = DeepMergeDefaults
+
 local function StripDefaults(db, defaults)
     -- Remove values that match defaults (for clean SavedVariables on logout)
     for k, v in pairs(defaults) do
         if type(v) == "table" and type(db[k]) == "table" then
             StripDefaults(db[k], v)
-            if not next(db[k]) then
+            -- Keep empty array entries; DeepMergeDefaults fills them on login.
+            if not next(db[k]) and type(k) ~= "number" then
                 db[k] = nil
             end
         elseif db[k] == v then
@@ -151,11 +155,15 @@ end
 
 local dbRegistry = {}  -- all db objects, for logout cleanup
 
+-- Expose so the profile system can update db.profile in-place after injection
+EUILite._dbRegistry = dbRegistry
+
 --- Create or open a database. Replaces AceDB:New(svName, defaults, true).
 -- Returns a db object with .profile pointing to the active profile table.
 -- @param svName  Global SavedVariables name (string)
 -- @param defaults  Table with a .profile sub-table of default values
-function EUILite.NewDB(svName, defaults)
+-- @param defaultToCharKey  When true, new characters default to their own profile
+function EUILite.NewDB(svName, defaults, defaultToCharKey)
     -- Get or create the global SV table
     local sv = _G[svName]
     if type(sv) ~= "table" then
@@ -163,7 +171,11 @@ function EUILite.NewDB(svName, defaults)
         _G[svName] = sv
     end
 
-    -- Determine profile key
+    -- Determine profile key.
+    -- The profile system's ADDON_LOADED handler pre-populates profileKeys
+    -- with the correct profile name before NewDB runs. If no entry exists
+    -- (e.g. fresh install), fall back to "Default" -- never create a
+    -- per-character profile name.
     local charKey = UnitName("player") .. " - " .. GetRealmName()
     if type(sv.profileKeys) ~= "table" then sv.profileKeys = {} end
     local profileName = sv.profileKeys[charKey] or "Default"
@@ -194,9 +206,14 @@ function EUILite.NewDB(svName, defaults)
         end
     end
 
+    -- Store defaults on the SV table so the profile system can re-apply
+    -- them after loading an old snapshot that may be missing newer keys.
+    sv._defaults = defaults
+
     -- Build the db object
     local db = {
         sv = sv,
+        svName = svName,
         profile = profile,
         _profileName = profileName,
         _defaults = defaults,
@@ -219,10 +236,25 @@ end
 
 --------------------------------------------------------------------------------
 --  Logout handler: strip defaults so SavedVariables stay clean
+--  Fires pre-logout callbacks first so systems like Profiles can snapshot
+--  the full profile data before defaults are stripped.
 --------------------------------------------------------------------------------
+local preLogoutCallbacks = {}
+
+--- Register a function to run before StripDefaults on logout.
+--- Used by the profile system to save a complete snapshot.
+function EUILite.RegisterPreLogout(fn)
+    tinsert(preLogoutCallbacks, fn)
+end
+
 local logoutFrame = CreateFrame("Frame")
 logoutFrame:RegisterEvent("PLAYER_LOGOUT")
 logoutFrame:SetScript("OnEvent", function()
+    -- Fire pre-logout callbacks (profile save, etc.) while data is still intact
+    for _, fn in ipairs(preLogoutCallbacks) do
+        safecall(fn)
+    end
+
     for _, db in pairs(dbRegistry) do
         if db._profileDefaults and db.profile then
             StripDefaults(db.profile, db._profileDefaults)
@@ -260,6 +292,20 @@ lifecycleFrame:SetScript("OnEvent", function(self, event, arg1)
 
     -- Process enable queue once logged in
     if IsLoggedIn() then
+        -- Ensure PP.mult is current before any addon's OnEnable runs.
+        -- PP is defined in EllesmereUI.lua (loaded after this file) so it
+        -- exists by the time PLAYER_LOGIN fires.
+        if EllesmereUI and EllesmereUI.PP and EllesmereUI.PP.UpdateMult then
+            EllesmereUI.PP.UpdateMult()
+        end
+        -- Apply spec-assigned profile data into each child SV before any
+        -- OnEnable runs. The spec API is available here (after OnInitialize,
+        -- before OnEnable) so we can resolve the current spec and inject the
+        -- correct profile snapshot. This is the earliest safe point to do
+        -- this -- ADDON_LOADED is too early (spec API not ready yet).
+        if EllesmereUI and EllesmereUI.PreSeedSpecProfile then
+            EllesmereUI.PreSeedSpecProfile()
+        end
         while #enableQueue > 0 do
             local addon = tremove(enableQueue, 1)
             if addon.enabledState then

@@ -62,7 +62,7 @@ initFrame:SetScript("OnEvent", function(self)
     end
 
     ---------------------------------------------------------------------------
-    --  Preview Header â€” shows potential buff/aura icons for current class/spec
+    --  Preview Header shows potential buff/aura icons for current class/spec
     ---------------------------------------------------------------------------
     local _previewHeaderBuilder
     local _previewIcons = {}
@@ -246,7 +246,7 @@ initFrame:SetScript("OnEvent", function(self)
                     elseif entry.autocast and _G._EABR_StartAutoCastShine then
                         _G._EABR_StartAutoCastShine(btn._glowWrapper, sz, gc.r, gc.g, gc.b, 1.0)
                     elseif _G._EABR_StartFlipBookGlow then
-                        -- FlipBook glow (GCD, Modern WoW, Classic WoW) â€” use shared live function
+                        -- FlipBook glow (GCD, Modern WoW, Classic WoW) use shared live function
                         _G._EABR_StartFlipBookGlow(btn._glowWrapper, sz, entry, gc.r, gc.g, gc.b)
                     end
                     btn._glowWrapper:Show()
@@ -409,6 +409,19 @@ initFrame:SetScript("OnEvent", function(self)
         local sf = EllesmereUI._scrollFrame
         if not sf then return end
 
+        local child = sf.GetScrollChild and sf:GetScrollChild()
+        if child and m.target and m.target.GetTop and child.GetTop then
+            local targetTop = m.target:GetTop()
+            local childTop = child:GetTop()
+            if targetTop and childTop then
+                local scrollPos = math.max(0, childTop - targetTop - 40)
+                EllesmereUI.SmoothScrollTo(scrollPos)
+                C_Timer.After(0.15, function() EABRPlaySettingGlow(m.target) end)
+                return
+            end
+        end
+
+        -- Fallback for layouts where the scroll child isn't ready yet.
         local _, _, _, _, headerY = m.section:GetPoint(1)
         if headerY then
             local scrollPos = math.max(0, math.abs(headerY) - 40)
@@ -425,22 +438,10 @@ initFrame:SetScript("OnEvent", function(self)
         btn:SetFrameLevel(frameLevelOverride or (anchor:GetFrameLevel() + 20))
         btn:RegisterForClicks("LeftButtonDown")
         local c = EllesmereUI.ELLESMERE_GREEN
-        local function MkHL()
-            local t = btn:CreateTexture(nil, "OVERLAY", nil, 7)
-            t:SetColorTexture(c.r, c.g, c.b, 1)
-            if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false); t:SetTexelSnappingBias(0) end
-            return t
-        end
-        local ht = MkHL(); ht:SetHeight(2); ht:SetPoint("TOPLEFT", btn, "TOPLEFT"); ht:SetPoint("TOPRIGHT", btn, "TOPRIGHT")
-        local hb = MkHL(); hb:SetHeight(2); hb:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT"); hb:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT")
-        local hl = MkHL(); hl:SetWidth(2); hl:SetPoint("TOPLEFT", ht, "BOTTOMLEFT"); hl:SetPoint("BOTTOMLEFT", hb, "TOPLEFT")
-        local hr = MkHL(); hr:SetWidth(2); hr:SetPoint("TOPRIGHT", ht, "BOTTOMRIGHT"); hr:SetPoint("BOTTOMRIGHT", hb, "TOPRIGHT")
-        btn._hlTextures = { ht, hb, hl, hr }
-        local function ShowHL() for _, t in ipairs(btn._hlTextures) do t:Show() end end
-        local function HideHL() for _, t in ipairs(btn._hlTextures) do t:Hide() end end
-        HideHL()
-        btn:SetScript("OnEnter", function() ShowHL() end)
-        btn:SetScript("OnLeave", function() HideHL() end)
+        local brd = EllesmereUI.PP.CreateBorder(btn, c.r, c.g, c.b, 1, 2, "OVERLAY", 7)
+        brd:Hide()
+        btn:SetScript("OnEnter", function() brd:Show() end)
+        btn:SetScript("OnLeave", function() brd:Hide() end)
         btn:SetScript("OnMouseDown", function() EABRNavigateToSetting(mappingKey) end)
         _eabrHitOverlays[#_eabrHitOverlays + 1] = btn
         return btn
@@ -515,7 +516,7 @@ initFrame:SetScript("OnEvent", function(self)
                 -- Use per-item key if available, fall back to category
                 local mappingKey = pIcon.data.itemKey and ("item:" .. pIcon.data.itemKey) or (pIcon.data.cat or "display")
                 EABRCreateHitOverlay(pIcon.frame, mappingKey, overlayLevel)
-                -- Hit overlay on text label â†’ scrolls to Show Text setting
+                -- Hit overlay on text label scrolls to Show Text setting
                 if pIcon.frame._text and showText then
                     EABRCreateHitOverlay(pIcon.frame._text, "showText", overlayLevel)
                 end
@@ -693,7 +694,7 @@ initFrame:SetScript("OnEvent", function(self)
         local y = yOffset
         local _, h, row
 
-        -- Cell reference table for preview icon â†’ specific toggle navigation
+        -- Cell reference table for preview icon specific toggle navigation
         local _gridCellRefs = {}
 
         -- Set up the preview header
@@ -890,6 +891,19 @@ initFrame:SetScript("OnEvent", function(self)
                   local d = DDB(); if not d then return end; d.opacity = v
                   RefreshAll(); UpdatePreviewHeader()
               end }
+        );  y = y - h
+
+        -- Frame Strata
+        _, h = W:DualRow(parent, y,
+            { type="dropdown", text="Frame Strata",
+              values=_G._EABR_STRATA_VALUES or {MEDIUM="Medium"},
+              order=_G._EABR_STRATA_ORDER or {"MEDIUM"},
+              getValue=function() local d = DDB(); return d and d.frameStrata or "MEDIUM" end,
+              setValue=function(v)
+                  local d = DDB(); if not d then return end; d.frameStrata = v
+                  if _G._EABR_ApplyStrata then _G._EABR_ApplyStrata() end
+              end },
+            { type="label", text="" }
         );  y = y - h
 
         _, h = W:Spacer(parent, y, 20);  y = y - h
@@ -1183,7 +1197,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local c = CDB()
                 local current = c and c.inkyBlackZones or ""
                 EllesmereUI:ShowInputPopup({
-                    title = "Inky Black Potion â€” Zone IDs",
+                    title = "Inky Black Potion Zone IDs",
                     message = "Enter map zone IDs separated by commas.\nThe potion reminder will only show in these zones.",
                     placeholder = "e.g. 2248, 2339",
                     initialText = current,
@@ -1340,7 +1354,7 @@ initFrame:SetScript("OnEvent", function(self)
         end
 
         -----------------------------------------------------------------------
-        --  SECTION: ADD REMINDER (no header â€” clean layout)
+        --  SECTION: ADD REMINDER (no header clean layout)
         -----------------------------------------------------------------------
 
         -- Helper: build comma-separated zone label from selectedZoneMap
@@ -1787,7 +1801,7 @@ initFrame:SetScript("OnEvent", function(self)
                 local row = MakeListRow(-totalH)
                 local capturedIdx = idx
 
-                -- === LEFT HALF: delete (Ã—) | zone name | talent name + icon ===
+                -- === LEFT HALF: delete (—) | zone name | talent name + icon ===
 
                 -- Delete button (far left)
                 local delBtn = CreateFrame("Button", nil, row)
@@ -2039,7 +2053,7 @@ initFrame:SetScript("OnEvent", function(self)
         onPageCacheRestore = function(pageName)
             if pageName == PAGE_REMINDERS then
                 UpdatePreviewHeader()
-                -- Refresh hint visibility â€” never recreate here, just show/hide
+                -- Refresh hint visibility never recreate here, just show/hide
                 local dismissed = IsPreviewHintDismissed()
                 if _previewHintFS then
                     if dismissed then

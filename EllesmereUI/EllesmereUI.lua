@@ -374,7 +374,7 @@ local function DisablePixelSnap(obj)
 end
 
 -- Create a dropdown arrow texture for dropdown buttons.
--- Uses a 30Ã--30 square canvas image with the arrow centered, anchored via
+-- Uses a 30--30 square canvas image with the arrow centered, anchored via
 -- two-point attachment so it inherits the parent's pixel-aligned bounds.
 local function MakeDropdownArrow(parent, xPad, ppOverride)
     local pp = ppOverride or PP
@@ -397,6 +397,7 @@ local function MakeBorder(parent, r, g, b, a, ppOverride)
     local bf = CreateFrame("Frame", nil, parent)
     bf:SetAllPoints(parent)
     bf:SetFrameLevel(parent:GetFrameLevel() + 1)
+    bf:EnableMouse(false)
 
     -- Use the unified border system (returns a single BackdropTemplate frame)
     local brd = PP.CreateBorder(bf, r, g, b, alpha, 1, "BORDER", 7)
@@ -462,7 +463,7 @@ end
 local function lerp(a, b, t) return a + (b - a) * t end
 
 -------------------------------------------------------------------------------
---  Exports  (shared locals â†’ EllesmereUI table for split files)
+--  Exports  (shared locals EllesmereUI table for split files)
 -------------------------------------------------------------------------------
 -- Visual constants (tables)
 EllesmereUI.ELLESMERE_GREEN = ELLESMERE_GREEN
@@ -629,9 +630,16 @@ do
             return
         end
         if not EllesmereUIDB then EllesmereUIDB = {} end
+        local currentScale = UIParent and UIParent:GetScale() or 1
+        local scaleChanged = math.abs(currentScale - newScale) > 0.0001
         EllesmereUIDB.ppUIScale = newScale
         UIParent:SetScale(newScale)
         PP.UpdateMult()
+        if scaleChanged then
+            if _G._EUF_ReloadFrames then _G._EUF_ReloadFrames() end
+            if _G._ERB_Apply then _G._ERB_Apply() end
+            if _G._EAB_Apply then _G._EAB_Apply() end
+        end
     end
 
     ---------------------------------------------------------------------------
@@ -650,6 +658,25 @@ do
         local pixels = x / m
         pixels = x > 0 and math.floor(pixels) or math.ceil(pixels)
         return pixels * m
+    end
+
+    ---------------------------------------------------------------------------
+    --  SnapForES(x, effectiveScale)
+    --
+    --  Snap a value to a whole number of physical pixels at the given
+    --  effective scale.  Uses the same approach as the border system:
+    --    onePixel = perfect / es   (size of 1 physical pixel in frame coords)
+    --    physPixels = floor(x / onePixel + 0.5)   (round to nearest whole pixel)
+    --    result = physPixels * onePixel
+    --
+    --  This guarantees every element sized through this function is exactly
+    --  N physical pixels, eliminating sub-pixel drift between siblings.
+    ---------------------------------------------------------------------------
+    function PP.SnapForES(x, es)
+        if x == 0 then return 0 end
+        local onePixel = PP.perfect / es
+        local physPixels = math.floor(x / onePixel + 0.5)
+        return physPixels * onePixel
     end
 
     ---------------------------------------------------------------------------
@@ -704,6 +731,7 @@ do
     ---------------------------------------------------------------------------
     function PP.DisablePixelSnap(obj)
         if not obj or obj.PixelSnapDisabled then return end
+        if obj.IsForbidden and obj:IsForbidden() then return end
 
         -- Textures and FontStrings expose SetSnapToPixelGrid directly
         local target = obj
@@ -721,6 +749,70 @@ do
             target:SetTexelSnappingBias(0)
         end
         obj.PixelSnapDisabled = true
+    end
+
+    ---------------------------------------------------------------------------
+    --  Global Pixel Snap Prevention
+    --
+    --  WoW re-enables pixel snapping whenever a texture's properties change
+    --  (SetTexture, SetColorTexture, SetVertexColor, SetTexCoord, etc.).
+    --  This hooks the widget metatables so that every texture/statusbar in
+    --  the game automatically has pixel snapping disabled after any property
+    --  change. Without this, manual DisablePixelSnap calls get undone by
+    --  Blizzard's code on spell swaps, page changes, combat transitions, etc.
+    ---------------------------------------------------------------------------
+    local function WatchPixelSnap(frame, snap)
+        if (frame and not frame:IsForbidden()) and frame.PixelSnapDisabled and snap then
+            frame.PixelSnapDisabled = nil
+        end
+    end
+
+    local function HookPixelSnap(object)
+        local mk = getmetatable(object)
+        if not mk then return end
+        mk = mk.__index
+        if not mk or mk.DisabledPixelSnap then return end
+
+        if mk.SetSnapToPixelGrid or mk.SetStatusBarTexture or mk.SetColorTexture
+           or mk.SetVertexColor or mk.CreateTexture or mk.SetTexCoord or mk.SetTexture then
+            if mk.SetSnapToPixelGrid then hooksecurefunc(mk, "SetSnapToPixelGrid", WatchPixelSnap) end
+            if mk.SetStatusBarTexture then hooksecurefunc(mk, "SetStatusBarTexture", PP.DisablePixelSnap) end
+            if mk.SetColorTexture then hooksecurefunc(mk, "SetColorTexture", PP.DisablePixelSnap) end
+            if mk.SetVertexColor then hooksecurefunc(mk, "SetVertexColor", PP.DisablePixelSnap) end
+            if mk.CreateTexture then hooksecurefunc(mk, "CreateTexture", PP.DisablePixelSnap) end
+            if mk.SetTexCoord then hooksecurefunc(mk, "SetTexCoord", PP.DisablePixelSnap) end
+            if mk.SetTexture then hooksecurefunc(mk, "SetTexture", PP.DisablePixelSnap) end
+            mk.DisabledPixelSnap = true
+        end
+    end
+
+    -- Hook all known widget types by creating one of each and hooking its metatable
+    local hookFrame = CreateFrame("Frame")
+    HookPixelSnap(hookFrame)
+    HookPixelSnap(hookFrame:CreateTexture())
+    HookPixelSnap(hookFrame:CreateFontString())
+    HookPixelSnap(hookFrame:CreateMaskTexture())
+
+    -- Enumerate all existing frame types to catch any we missed
+    local hookedTypes = { Frame = true }
+    local enumObj = EnumerateFrames()
+    while enumObj do
+        local objType = enumObj:GetObjectType()
+        if not enumObj:IsForbidden() and not hookedTypes[objType] then
+            HookPixelSnap(enumObj)
+            hookedTypes[objType] = true
+        end
+        enumObj = EnumerateFrames(enumObj)
+    end
+
+    -- Also hook ScrollFrame and StatusBar metatables
+    HookPixelSnap(CreateFrame("ScrollFrame"))
+    do
+        local sb = CreateFrame("StatusBar")
+        sb:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
+        HookPixelSnap(sb)
+        local sbt = sb:GetStatusBarTexture()
+        if sbt then HookPixelSnap(sbt) end
     end
 
     ---------------------------------------------------------------------------
@@ -894,6 +986,7 @@ do
     local scaleWatcher = CreateFrame("Frame")
     scaleWatcher:RegisterEvent("UI_SCALE_CHANGED")
     scaleWatcher:RegisterEvent("DISPLAY_SIZE_CHANGED")
+    scaleWatcher:RegisterEvent("PLAYER_ENTERING_WORLD")
     scaleWatcher:SetScript("OnEvent", function(_, event)
         if event == "DISPLAY_SIZE_CHANGED" then
             -- Resolution changed — recalculate perfect and re-apply scale
@@ -910,6 +1003,19 @@ do
         end
         -- Re-snap all borders with the new scale values
         PP.ResnapAllBorders()
+        -- Re-sync panel scale so pixel-perfect stays accurate after
+        -- loading screens, resolution changes, or UI scale changes
+        local mf = EllesmereUI._mainFrame
+        if mf and mf:IsShown() then
+            local physW = (GetPhysicalScreenSize())
+            local sw = GetScreenWidth()
+            if physW and physW > 0 and sw and sw > 0 then
+                local baseScale = sw / physW
+                local userScale = (EllesmereUIDB and EllesmereUIDB.panelScale) or 1.0
+                mf:SetScale(baseScale * userScale)
+                if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
+            end
+        end
     end)
 end
 
@@ -1017,7 +1123,7 @@ local PanelPP = EllesmereUI.PanelPP
 
 -- Default power colors (from WoW's PowerBarColor)
 EllesmereUI.DEFAULT_POWER_COLORS = {
-    MANA         = { r = 0.000, g = 0.000, b = 1.000 },
+    MANA         = { r = 0x33/255, g = 0x59/255, b = 0xD9/255 },
     RAGE         = { r = 1.000, g = 0.000, b = 0.000 },
     FOCUS        = { r = 1.000, g = 0.500, b = 0.250 },
     ENERGY       = { r = 1.000, g = 1.000, b = 0.000 },
@@ -1091,7 +1197,7 @@ end
 -- Canonical font name → filename mapping (shared across all addons)
 EllesmereUI.FONT_FILES = {
     ["Expressway"]          = "Expressway.TTF",
-    ["Avant Garde"]         = "Avant Garde.ttf",
+    ["Avant Garde"]         = "Avant Garde Naowh.ttf",
     ["Arial Bold"]          = "Arial Bold.TTF",
     ["Poppins"]             = "Poppins.ttf",
     ["Fira Sans Medium"]    = "FiraSans Medium.ttf",
@@ -1131,6 +1237,36 @@ EllesmereUI.FONT_ORDER = {
 EllesmereUI.FONT_DISPLAY_NAMES = {
     ["Avant Garde"] = "Avant Garde (Naowh)",
 }
+
+-- Register our bundled fonts with LibSharedMedia so other addons can use them
+-- and so SM's HashTable("font") includes them for our own dropdown lookups.
+-- Also populate _smFontPaths so ResolveFontName can resolve SM fonts at runtime.
+do
+    local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if LSM then
+        for name, file in pairs(EllesmereUI.FONT_FILES) do
+            if file then
+                LSM:Register(LSM.MediaType.FONT, name, MEDIA_PATH .. "fonts\\" .. file)
+            end
+        end
+        -- Snapshot all currently registered SM fonts into the path lookup
+        local smFonts = LSM:HashTable("font")
+        if smFonts then
+            EllesmereUI._smFontPaths = {}
+            for name, path in pairs(smFonts) do
+                EllesmereUI._smFontPaths[name] = path
+            end
+        end
+        -- Listen for late-registered fonts from other addons
+        LSM.RegisterCallback(EllesmereUI, "LibSharedMedia_Registered", function(_, mediatype, key)
+            if mediatype == "font" then
+                if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+                local path = LSM:Fetch("font", key)
+                if path then EllesmereUI._smFontPaths[key] = path end
+            end
+        end)
+    end
+end
 
 -- Get the fonts DB table (lazy-init)
 function EllesmereUI.GetFontsDB()
@@ -1549,6 +1685,126 @@ function EllesmereUI.GetMaelstromWeapon()
     return (aura and aura.applications or 0), max
 end
 
+EllesmereUI.RESOURCE_BAR_ANCHOR_KEYS = {
+    none = true,
+    mouse = true,
+    partyframe = true,
+    playerframe = true,
+    erb_classresource = true,
+    erb_powerbar = true,
+    erb_health = true,
+    erb_castbar = true,
+    erb_cdm = true,
+}
+
+do
+local PARTY_FRAME_SOURCES = {
+    { addon = "ElvUI",  prefix = "ElvUF_PartyGroup1UnitButton", count = 5 },
+    { addon = "Cell",   prefix = "CellPartyFrameMember",        count = 5 },
+    { addon = nil,      prefix = "CompactPartyFrameMember",     count = 5 },
+    { addon = nil,      prefix = "CompactRaidFrame",            count = 40 },
+}
+
+local PLAYER_FRAME_SOURCES = {
+    { addon = "EllesmereUIUnitFrames", global = "EllesmereUIUnitFrames_Player" },
+    { addon = "ElvUI",                 global = "ElvUF_Player" },
+}
+
+local _cachedPartyFrame   = nil
+local _cachedPlayerFrame  = nil
+local _cachedRosterToken  = -1
+
+local function RosterToken()
+    return GetNumGroupMembers()
+end
+
+local function CacheValid()
+    return _cachedRosterToken == RosterToken()
+end
+
+-- Invalidate both caches. Called by CDM and ResourceBars on GROUP_ROSTER_UPDATE
+-- and PLAYER_SPECIALIZATION_CHANGED so the next lookup rescans.
+function EllesmereUI.InvalidateFrameCache()
+    _cachedPartyFrame  = nil
+    _cachedPlayerFrame = nil
+    _cachedRosterToken = -1
+end
+
+function EllesmereUI.FindPlayerPartyFrame()
+    if _cachedPartyFrame and CacheValid() and _cachedPartyFrame:IsVisible() then
+        return _cachedPartyFrame
+    end
+    _cachedPartyFrame  = nil
+    _cachedRosterToken = RosterToken()
+
+    for _, src in ipairs(PARTY_FRAME_SOURCES) do
+        if not src.addon or C_AddOns.IsAddOnLoaded(src.addon) then
+            for i = 1, src.count do
+                local frame = _G[src.prefix .. i]
+                if frame and frame.GetAttribute and frame:GetAttribute("unit") == "player"
+                   and frame.IsVisible and frame:IsVisible() then
+                    _cachedPartyFrame = frame
+                    return frame
+                end
+            end
+        end
+    end
+
+    if C_AddOns.IsAddOnLoaded("DandersFrames") then
+        local container = _G["DandersPartyContainer"]
+        if container and container.IsVisible and container:IsVisible() then
+            _cachedPartyFrame = container
+            return container
+        end
+    end
+
+    return nil
+end
+
+function EllesmereUI.FindPlayerUnitFrame()
+    if _cachedPlayerFrame and CacheValid() and _cachedPlayerFrame:IsVisible() then
+        local u = _cachedPlayerFrame.GetAttribute and _cachedPlayerFrame:GetAttribute("unit")
+        if not u or UnitIsUnit(u, "player") then
+            return _cachedPlayerFrame
+        end
+    end
+    _cachedPlayerFrame = nil
+    _cachedRosterToken = RosterToken()
+
+    for _, src in ipairs(PLAYER_FRAME_SOURCES) do
+        if C_AddOns.IsAddOnLoaded(src.addon) then
+            local frame = _G[src.global]
+            if frame and frame.IsVisible and frame:IsVisible() then
+                _cachedPlayerFrame = frame
+                return frame
+            end
+        end
+    end
+
+    if C_AddOns.IsAddOnLoaded("DandersFrames") then
+        local header = _G["DandersPartyHeader"]
+        if header then
+            for i = 1, 5 do
+                local child = header:GetAttribute("child" .. i)
+                if child and child.GetAttribute and child:GetAttribute("unit") == "player"
+                   and child.IsVisible and child:IsVisible() then
+                    _cachedPlayerFrame = child
+                    return child
+                end
+            end
+        end
+    end
+
+    local blizz = _G["PlayerFrame"]
+    if blizz and blizz.IsVisible and blizz:IsVisible() then
+        _cachedPlayerFrame = blizz
+        return blizz
+    end
+
+    return nil
+end
+end
+
 -- Tip of the Spear and Whirlwind Stacks are now tracked manually via
 -- HandleTipOfTheSpear / HandleWhirlwindStacks + UNIT_SPELLCAST_SUCCEEDED.
 -- See the manual tracker section above.
@@ -1660,6 +1916,12 @@ function EllesmereUI.AppendSharedMediaFonts(values, order, opts)
     local smFonts = LSM:HashTable("font")
     if not smFonts then return end
 
+    -- Build the SM font path lookup so ResolveFontName can find SM fonts
+    if not EllesmereUI._smFontPaths then EllesmereUI._smFontPaths = {} end
+    for name, path in pairs(smFonts) do
+        EllesmereUI._smFontPaths[name] = path
+    end
+
     local keyByName = opts and opts.keyByName
     local sorted = {}
     for name in pairs(smFonts) do
@@ -1742,6 +2004,13 @@ local function WirePopupEscape(popup, dimmer)
             self:SetPropagateKeyboardInput(true)
         end
     end)
+    -- Release keyboard capture when the popup is dismissed
+    dimmer:HookScript("OnHide", function()
+        popup:EnableKeyboard(false)
+    end)
+    dimmer:HookScript("OnShow", function()
+        popup:EnableKeyboard(true)
+    end)
 end
 
 local function CreateConfirmPopup()
@@ -1804,6 +2073,16 @@ local function CreateConfirmPopup()
     disc:SetWordWrap(true)
     disc:Hide()
     popup._disclaimer = disc
+
+    -- Scale/resolution mismatch warning (red, below disclaimer)
+    local scaleWarn = MakeFont(popup, 10, nil, 1, 0.2, 0.2, 1)
+    scaleWarn:SetWidth(POPUP_W - 40)
+    scaleWarn:SetJustifyH("CENTER")
+    scaleWarn:SetWordWrap(true)
+    scaleWarn:SetSpacing(2)
+    scaleWarn:Hide()
+    popup._scaleWarnLabel = scaleWarn
+    popup._baseH = POPUP_H
 
     -- Button dimensions
     local BTN_W, BTN_H = 135, 29
@@ -1920,6 +2199,24 @@ function EllesmereUI:ShowConfirmPopup(opts)
         popup._disclaimer:SetText("")
         popup._disclaimer:Hide()
     end
+
+    -- Scale/resolution mismatch warning (red)
+    local scaleWarnH = 0
+    if opts.scaleWarning and opts.scaleWarning ~= "" then
+        popup._scaleWarnLabel:ClearAllPoints()
+        if opts.disclaimer and opts.disclaimer ~= "" then
+            popup._scaleWarnLabel:SetPoint("TOP", popup._disclaimer, "BOTTOM", 0, -14)
+        else
+            popup._scaleWarnLabel:SetPoint("TOP", popup._msg, "BOTTOM", 0, -14)
+        end
+        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:Show()
+        scaleWarnH = 16
+    else
+        popup._scaleWarnLabel:SetText("")
+        popup._scaleWarnLabel:Hide()
+    end
+    popup:SetHeight((popup._baseH or 176) + scaleWarnH)
     popup._cancelBtn._lbl:SetText(opts.cancelText or "Cancel")
     popup._confirmBtn._lbl:SetText(opts.confirmText or "Confirm")
     -- onDismiss: called on escape/click-outside. Falls back to onCancel if not provided.
@@ -2303,11 +2600,31 @@ function EllesmereUI:ShowInputPopup(opts)
         end)
         popup._editBox = editBox
 
+        -- Optional warning text (shown below the input field)
+        local warnLabel = MakeFont(popup, 10, nil, 1, 0.65, 0.2, 0.85)
+        warnLabel:SetPoint("TOP", inputFrame, "BOTTOM", 0, -8)
+        warnLabel:SetWidth(POPUP_W - 40)
+        warnLabel:SetJustifyH("CENTER")
+        warnLabel:SetWordWrap(true)
+        warnLabel:SetSpacing(2)
+        warnLabel:Hide()
+        popup._warnLabel = warnLabel
+        popup._inputFrame = inputFrame  -- store so reuse block can anchor against it
+
+        -- Optional scale/resolution mismatch warning (red, shown below the orange warning)
+        local scaleWarnLabel = MakeFont(popup, 10, nil, 1, 0.2, 0.2, 1)
+        scaleWarnLabel:SetWidth(POPUP_W - 40)
+        scaleWarnLabel:SetJustifyH("CENTER")
+        scaleWarnLabel:SetWordWrap(true)
+        scaleWarnLabel:SetSpacing(2)
+        scaleWarnLabel:Hide()
+        popup._scaleWarnLabel = scaleWarnLabel
+
         -- Optional extra button (shown above the input field, e.g. "Add Current Zone")
         local EXTRA_BTN_W, EXTRA_BTN_H = 160, 28
         local extraBtn = CreateFrame("Button", nil, popup)
         extraBtn:SetSize(EXTRA_BTN_W, EXTRA_BTN_H)
-        extraBtn:SetPoint("BOTTOM", inputFrame, "TOP", 0, 6)
+        extraBtn:SetPoint("TOP", inputFrame, "BOTTOM", 0, -6)
         extraBtn:SetFrameLevel(popup:GetFrameLevel() + 2)
         local extraBrd = SolidTex(extraBtn, "BACKGROUND", 1, 1, 1, 0.25)
         extraBrd:SetAllPoints()
@@ -2439,6 +2756,7 @@ function EllesmereUI:ShowInputPopup(opts)
     popup._confirmBtn._resetAnim()
 
     -- Extra button (e.g. "Add Current Zone")
+    local extraH = 0
     if opts.extraButton then
         popup._extraLbl:SetText(opts.extraButton.text or "Extra")
         popup._extraBtn._resetAnim()
@@ -2446,11 +2764,42 @@ function EllesmereUI:ShowInputPopup(opts)
             if opts.extraButton.onClick then opts.extraButton.onClick(popup._editBox) end
         end)
         popup._extraBtn:Show()
-        popup:SetHeight(220)  -- taller to fit extra button
+        extraH = 26
     else
         popup._extraBtn:Hide()
-        popup:SetHeight(194)  -- default height
     end
+
+    -- Optional warning text below the input field
+    local warnH = 0
+    if opts.warning and opts.warning ~= "" then
+        popup._warnLabel:ClearAllPoints()
+        popup._warnLabel:SetPoint("TOP", popup._inputFrame, "BOTTOM", 0, -18)
+        popup._warnLabel:SetText(opts.warning)
+        popup._warnLabel:Show()
+        warnH = 24
+    else
+        popup._warnLabel:SetText("")
+        popup._warnLabel:Hide()
+    end
+
+    -- Optional scale/resolution mismatch warning (red)
+    local scaleWarnH = 0
+    if opts.scaleWarning and opts.scaleWarning ~= "" then
+        popup._scaleWarnLabel:ClearAllPoints()
+        if opts.warning and opts.warning ~= "" then
+            popup._scaleWarnLabel:SetPoint("TOP", popup._warnLabel, "BOTTOM", 0, -14)
+        else
+            popup._scaleWarnLabel:SetPoint("TOP", popup._inputFrame, "BOTTOM", 0, -18)
+        end
+        popup._scaleWarnLabel:SetText(opts.scaleWarning)
+        popup._scaleWarnLabel:Show()
+        scaleWarnH = 30
+    else
+        popup._scaleWarnLabel:SetText("")
+        popup._scaleWarnLabel:Hide()
+    end
+
+    popup:SetHeight(194 + extraH + warnH + scaleWarnH)
 
     popup._cancelBtn:SetScript("OnClick", function()
         popup._dimmer:Hide()
@@ -2495,6 +2844,25 @@ local function CreateMainFrame()
     mainFrame:EnableMouse(false)
     mainFrame:SetMovable(true)
     mainFrame:SetScript("OnShow", function()
+        -- Recalculate pixel-perfect base scale every time the panel opens
+        -- so resolution or UIParent scale changes are picked up immediately
+        local physW2 = (GetPhysicalScreenSize())
+        local baseScale2 = GetScreenWidth() / physW2
+        local userScale2 = (EllesmereUIDB and EllesmereUIDB.panelScale) or 1.0
+        mainFrame:SetScale(baseScale2 * userScale2)
+        -- Re-sync PanelPP mult for the (possibly new) scale
+        if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
+        -- Re-snap all borders after the scale change. Effective scale
+        -- propagates through the frame hierarchy after layout, so wait
+        -- 2 frames before re-snapping to ensure accurate values.
+        local snapTicks = 0
+        mainFrame:SetScript("OnUpdate", function(self)
+            snapTicks = snapTicks + 1
+            if snapTicks >= 2 then
+                self:SetScript("OnUpdate", nil)
+                PP.ResnapAllBorders()
+            end
+        end)
         for _, fn in ipairs(_onShowCallbacks) do fn() end
     end)
     mainFrame:SetScript("OnHide", function()
@@ -3307,6 +3675,10 @@ local function CreateMainFrame()
     PanelPP.Point(scrollFrame, "TOPLEFT", clickArea, "TOPLEFT", rightX, -contentBaseTop)
     scrollFrame:SetFrameLevel(clickArea:GetFrameLevel() + 3)
     scrollFrame:EnableMouseWheel(true)
+    -- Clip child rendering to the scroll viewport so off-screen widgets
+    -- are skipped by the renderer. Without this, all widgets on a page
+    -- render every frame regardless of scroll position.
+    scrollFrame:SetClipsChildren(true)
 
     scrollChild = CreateFrame("Frame", nil, scrollFrame)
     PanelPP.Size(scrollChild, rightW, 1)
@@ -4635,6 +5007,15 @@ function EllesmereUI:ResetAllModules()
             config.onReset()
         end
     end
+    -- Clear unlock mode anchor relationships
+    if EllesmereUIDB then
+        EllesmereUIDB.unlockAnchors = nil
+        -- Wipe profile system data so the user starts fresh
+        EllesmereUIDB.profiles = nil
+        EllesmereUIDB.profileOrder = nil
+        EllesmereUIDB.specProfiles = nil
+        EllesmereUIDB.activeProfile = nil
+    end
 end
 
 -------------------------------------------------------------------------------
@@ -4729,6 +5110,9 @@ function EllesmereUI:SelectPage(pageName)
         cached.wrapper:Show()
         contentFrame:SetHeight(cached.totalH + 30)
 
+        -- Restore any elements hidden by a previous inline search
+        EllesmereUI:ApplyInlineSearch("")
+
         -- Restore this page's refresh list
         ClearWidgetRefreshList()
         if cached.refreshList then
@@ -4796,6 +5180,15 @@ function EllesmereUI:SelectPage(pageName)
         scrollFrame:SetVerticalScroll(0)
         UpdateScrollThumb()
     end
+
+    -- Re-snap all PP borders after tab switch. Cached frames are re-shown
+    -- without going through CreateBorder's built-in 2-frame re-snap, so
+    -- borders can end up misaligned until the panel is closed and reopened.
+    -- Waiting 1 frame ensures the frame hierarchy has finished layout before
+    -- we recalculate effective scales.
+    C_Timer.After(0, function()
+        if PP and PP.ResnapAllBorders then PP.ResnapAllBorders() end
+    end)
 end
 
 -- Rebuild the current page content without resetting scroll position
@@ -4887,6 +5280,9 @@ end
 
 function EllesmereUI:SelectModule(folderName)
     if not modules[folderName] then return end
+
+    -- Re-sync pixel perfect mult on every addon switch
+    if EllesmereUI.PanelPP then EllesmereUI.PanelPP.UpdateMult() end
 
     -- Save current page's content header under the CORRECT old key
     -- before we overwrite activeModule.
@@ -5191,7 +5587,7 @@ end
 -------------------------------------------------------------------------------
 --  Slash commands
 -------------------------------------------------------------------------------
-EllesmereUI.VERSION = "3.8"
+EllesmereUI.VERSION = "4.8.4"
 
 -- Register this addon's version into a shared global table (taint-free at load time)
 if not _G._EUI_AddonVersions then _G._EUI_AddonVersions = {} end
@@ -5612,7 +6008,8 @@ do
             statsFrame:SetSize(160, 60)
             statsFrame:SetFrameStrata("LOW")
             statsText = statsFrame:CreateFontString(nil, "OVERLAY")
-            statsText:SetFont(STANDARD_TEXT_FONT, 12, "OUTLINE")
+            local font = EllesmereUI.ResolveFontName(EllesmereUI.GetFontsDB().global)
+            statsText:SetFont(font, 12, EllesmereUI.GetFontOutlineFlag())
             statsText:SetPoint("TOPLEFT")
             statsText:SetJustifyH("LEFT")
         end
@@ -5810,6 +6207,67 @@ initFrame:SetScript("OnEvent", function(self, event)
     -- Create native minimap button
     EllesmereUI.CreateMinimapButton()
 
+    -- Add button to the Game Menu (Escape / pause menu)
+    if GameMenuFrame and not GameMenuFrame.EllesmereUI then
+        local btn = CreateFrame("Button", "EllesmereUI_GameMenuButton", GameMenuFrame, "MainMenuFrameButtonTemplate")
+        btn:SetSize(200, 35)
+        btn:SetScript("OnClick", function()
+            if InCombatLockdown() then
+                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                return
+            end
+            HideUIPanel(GameMenuFrame)
+            EllesmereUI:Toggle()
+        end)
+        GameMenuFrame.EllesmereUI = btn
+
+        local _gameMenuBaseHeight = nil
+        hooksecurefunc(GameMenuFrame, "Layout", function()
+            local eg = ELLESMERE_GREEN
+            local hex = string.format("|cff%02x%02x%02x", (eg.r or 0.05) * 255, (eg.g or 0.82) * 255, (eg.b or 0.62) * 255)
+            btn:SetText(hex .. "Ellesmere|r|cffffffff" .. "UI|r")
+
+            -- Find the Shop button to anchor below it (fall back to Options)
+            local anchorBtn
+            for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
+                local text = menuBtn:GetText()
+                if text == BLIZZARD_STORE then
+                    anchorBtn = menuBtn
+                    break
+                elseif text == GAMEMENU_OPTIONS then
+                    anchorBtn = menuBtn
+                end
+            end
+            if not anchorBtn then return end
+
+            -- Anchor our button below the Shop (or Options) button
+            btn:ClearAllPoints()
+            btn:SetPoint("TOP", anchorBtn, "BOTTOM", 0, -12)
+
+            -- Push all buttons that sit below the anchor down to make room
+            local anchorBottom = anchorBtn:GetBottom()
+            if anchorBottom then
+                for menuBtn in GameMenuFrame.buttonPool:EnumerateActive() do
+                    local top = menuBtn:GetTop()
+                    if top and top < anchorBottom + 2 then
+                        local p, rel, rp, x, y = menuBtn:GetPoint(1)
+                        if p then
+                            menuBtn:ClearAllPoints()
+                            menuBtn:SetPoint(p, rel, rp, x, (y or 0) - 40)
+                        end
+                    end
+                end
+            end
+
+            -- Store the base height once, then always set to base + 40
+            -- to prevent accumulation if Layout fires multiple times per open.
+            if not _gameMenuBaseHeight then
+                _gameMenuBaseHeight = GameMenuFrame:GetHeight()
+            end
+            GameMenuFrame:SetHeight(_gameMenuBaseHeight + 40)
+        end)
+    end
+
     -- Apply streamer settings
     if EllesmereUI._applyGuildChatPrivacy then EllesmereUI._applyGuildChatPrivacy() end
     if EllesmereUI._applySecondaryStats then EllesmereUI._applySecondaryStats() end
@@ -5881,7 +6339,10 @@ initFrame:SetScript("OnEvent", function(self, event)
         btn:SetPoint("CENTER", panel, "CENTER", 0, 0)
         btn:SetText("Open EllesmereUI")
         btn:SetScript("OnClick", function()
-            if InCombatLockdown() then return end
+            if InCombatLockdown() then
+                print("|cffff6060[EllesmereUI]|r Cannot open options during combat.")
+                return
+            end
             -- Close Blizzard settings first, then open ours on next frame to avoid taint
             if SettingsPanel and SettingsPanel:IsShown() then
                 HideUIPanel(SettingsPanel)
@@ -6015,3 +6476,92 @@ initFrame:SetScript("OnEvent", function(self, event)
         end
     end
 end)
+
+-------------------------------------------------------------------------------
+--  Shared Visibility System
+--  Unified visibility dropdown values, checkbox dropdown items, and runtime
+--  checks used by CDM, Action Bars, Resource Bars, and Unit Frames.
+-------------------------------------------------------------------------------
+
+-- Dropdown 1: Visibility mode
+EllesmereUI.VIS_VALUES = {
+    never      = "Never",
+    always     = "Always",
+    mouseover  = "Mouseover",
+    in_combat  = "In Combat",
+    in_raid    = "In Raid Group",
+    in_party   = "In Party",
+    solo       = "Solo",
+}
+EllesmereUI.VIS_ORDER = { "never", "always", "mouseover", "in_combat", "---", "in_raid", "in_party", "solo" }
+
+-- Checkbox dropdown 2: Visibility Options (keys match DB fields)
+EllesmereUI.VIS_OPT_ITEMS = {
+    { key = "visOnlyInstances",    label = "Only Show in Instances" },
+    { key = "visHideHousing",      label = "Hide in Housing" },
+    { key = "visHideMounted",      label = "Hide when Mounted" },
+    { key = "visHideNoTarget",     label = "Hide without Target",
+      tooltip = "This bar will only show if you have a target" },
+    { key = "visHideNoEnemy",      label = "Hide without Enemy Target",
+      tooltip = "This bar will only show if you have an enemy targeted" },
+}
+
+-- Runtime check: returns true if the element should be HIDDEN by visibility options.
+-- `opts` is the settings table containing the vis option booleans.
+function EllesmereUI.CheckVisibilityOptions(opts)
+    if not opts then return false end
+
+    -- Only Show in Instances
+    if opts.visOnlyInstances then
+        local _, iType, diffID = GetInstanceInfo()
+        diffID = tonumber(diffID) or 0
+        local inInstance = false
+        if diffID > 0 then
+            if C_Garrison and C_Garrison.IsOnGarrisonMap and C_Garrison.IsOnGarrisonMap() then
+                inInstance = false
+            elseif iType == "party" or iType == "raid" or iType == "scenario" or iType == "arena" or iType == "pvp" then
+                inInstance = true
+            end
+        end
+        if not inInstance then return true end
+    end
+
+    -- Hide in Housing
+    if opts.visHideHousing then
+        if C_Map and C_Map.GetBestMapForUnit then
+            local mapID = C_Map.GetBestMapForUnit("player")
+            if mapID and mapID > 2600 then return true end
+        end
+    end
+
+    -- Hide when Mounted
+    if opts.visHideMounted then
+        if IsMounted and IsMounted() then return true end
+    end
+
+    -- Hide without Target
+    if opts.visHideNoTarget then
+        if not UnitExists("target") then return true end
+    end
+
+    -- Hide without Enemy Target
+    if opts.visHideNoEnemy then
+        if not (UnitExists("target") and UnitCanAttack("player", "target")) then return true end
+    end
+
+    return false
+end
+
+-- Runtime check: returns true if the element should be SHOWN based on the
+-- visibility mode dropdown value. Caller provides combat/group state.
+-- `mode` is the string from the visibility dropdown.
+-- `state` is a table: { inCombat, inRaid, inParty }
+function EllesmereUI.CheckVisibilityMode(mode, state)
+    if mode == "never" then return false end
+    if mode == "in_combat" then return state.inCombat end
+    if mode == "in_raid" then return state.inRaid end
+    if mode == "in_party" then return state.inParty or state.inRaid end
+    if mode == "solo" then return not state.inRaid and not state.inParty end
+    -- "always" and "mouseover" both return true (mouseover handled separately)
+    return true
+end

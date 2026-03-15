@@ -148,12 +148,12 @@ local function Init()
     indicator:SetTextColor(0.8, 0.8, 0.2, 0.9)
     indicator:Hide()
 
-    local lastShiftPage = 0
-    C_Timer.NewTicker(0.1, function()
-        local sp = handler:GetAttribute("shiftPage") or 0
-        if sp ~= lastShiftPage then
-            lastShiftPage = sp
-            if sp == 1 then
+    -- Event-driven indicator: fires only when _onclick or _onstate-page
+    -- changes the shiftPage attribute. Replaces C_Timer.NewTicker(0.1) polling
+    -- which caused continuous ACTIONBAR_SLOT_CHANGED 29 spam (~30 events/sec).
+    handler:SetScript("OnAttributeChanged", function(self, name, value)
+        if name == "shiftPage" then
+            if value == 1 then
                 indicator:SetText("Bar 6")
                 indicator:Show()
             else
