@@ -332,6 +332,7 @@ function Options:Open()
     if not optionsFrame then
 
         optionsFrame = CreateFrame("Frame", "PhoenixCastBarsOptionsFrame", UIParent)
+        PCB.optionsFrame = optionsFrame  -- expose so changelog button can close it
         optionsFrame:SetFrameStrata("HIGH")
         optionsFrame:SetWidth(700)
         optionsFrame:SetHeight(600)
@@ -349,12 +350,39 @@ function Options:Open()
         optionsFrame:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
         tinsert(UISpecialFrames, "PhoenixCastBarsOptionsFrame")
 
+        -- Update arrow button to reflect menu open/closed state
+        local function UpdateArrow(arrowBtn, isOpen)
+            if not arrowBtn then return end
+            local normalTex  = arrowBtn:GetNormalTexture()
+            local pushedTex  = arrowBtn:GetPushedTexture()
+            if isOpen then
+                if normalTex then
+                    normalTex:SetTexture("Interface\\Buttons\\Arrow-Up-Up")
+                    normalTex:SetPoint("CENTER", arrowBtn, "CENTER", 3, 1)
+                end
+                if pushedTex then
+                    pushedTex:SetTexture("Interface\\Buttons\\Arrow-Up-Down")
+                    pushedTex:SetPoint("CENTER", arrowBtn, "CENTER", 3, 1)
+                end
+            else
+                if normalTex then
+                    normalTex:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+                    normalTex:SetPoint("CENTER", arrowBtn, "CENTER", 1, -3)
+                end
+                if pushedTex then
+                    pushedTex:SetTexture("Interface\\Buttons\\Arrow-Down-Down")
+                    pushedTex:SetPoint("CENTER", arrowBtn, "CENTER", 1, -3)
+                end
+            end
+        end
+
         -- Track all open dropdown menus (defined early for OnHide access)
         local activeMenus = {}
         local function CloseAllMenus()
             for menu in pairs(activeMenus) do
                 if menu and menu.Hide then
                     menu:Hide()
+                    UpdateArrow(menu._arrowBtn, false)
                 end
             end
             activeMenus = {}
@@ -377,6 +405,13 @@ function Options:Open()
             if discordPopup then
                 discordPopup:Hide()
             end
+        end)
+
+        -- Close all dropdown menus when clicking anywhere on the options frame
+        -- (menus are FULLSCREEN_DIALOG strata so clicks on them still reach their buttons)
+        optionsFrame:EnableMouse(true)
+        optionsFrame:SetScript("OnMouseDown", function(_, button)
+            if button == "LeftButton" then CloseAllMenus() end
         end)
          
         -- Custom font settings - CHANGE THESE to customize fonts
@@ -737,11 +772,37 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
 
         
         -- Version number (bottom right)
-        local footerVersion = footer:CreateFontString(nil, "OVERLAY")
-        footerVersion:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
+        local footerVersion = CreateFrame("Button", nil, footer)
+        footerVersion:SetSize(60, 20)
         footerVersion:SetPoint("RIGHT", footer, "RIGHT", -10, 0)
-        footerVersion:SetText("v" .. (PCB.version or "0.0.0"))
-        footerVersion:SetTextColor(0.5, 0.5, 0.5, 1)
+
+        local fvText = footerVersion:CreateFontString(nil, "OVERLAY")
+        fvText:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
+        fvText:SetAllPoints(footerVersion)
+        fvText:SetJustifyH("RIGHT")
+        fvText:SetText("v" .. (PCB.version or "0.0.0"))
+        fvText:SetTextColor(0.5, 0.5, 0.5, 1)
+
+        footerVersion:SetScript("OnEnter", function()
+            fvText:SetTextColor(
+                PCB.COLORS.PHOENIX_ORANGE[1],
+                PCB.COLORS.PHOENIX_ORANGE[2],
+                PCB.COLORS.PHOENIX_ORANGE[3]
+            )
+            GameTooltip:SetOwner(footerVersion, "ANCHOR_TOP")
+            GameTooltip:SetText("View Changelog")
+            GameTooltip:Show()
+        end)
+        footerVersion:SetScript("OnLeave", function()
+            fvText:SetTextColor(0.5, 0.5, 0.5, 1)
+            GameTooltip:Hide()
+        end)
+        footerVersion:SetScript("OnClick", function()
+            if PCB.UpdateCheck then
+                if PCB.optionsFrame then PCB.optionsFrame:Hide() end
+                PCB.UpdateCheck:ShowChangelog()
+            end
+        end)
 
         -- Assign frames to optionsFrame for later use
         optionsFrame.sidebar = sidebar
@@ -781,9 +842,13 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                     { type = "button", label = "Reset Profile", onClick = "resetProfile" },
                     { type = "label", text = "Current Profile: %s", getValue = "currentProfile" },
                     { type = "space" },
-                    { type = "description", text = "You can either create a new profile by entering a name in the editbox, or choose one of the already existing profiles." },
+                    { type = "description", text = "You can either create a new profile by entering a name and clicking Create, or choose one of the already existing profiles." },
                     { type = "editbox", label = "New", placeholder = "Profile name", key = "newProfile" },
+                    { type = "button",  label = "Create", onClick = "createProfile" },
                     { type = "dropdown", label = "Existing Profiles", key = "existingProfile" },
+                    { type = "space" },
+                    { type = "description", text = "Set a default profile that will be applied to any character that has not chosen a profile yet." },
+                    { type = "dropdown", label = "Default Profile", key = "defaultProfile" },
                     { type = "space" },
                     { type = "checkbox", label = "Enable spec profiles", tooltip = "When enabled, your profile will be set to the specified profile when you change specialization.", key = "profileMode", isProfileMode = "spec" },
                     { type = "specdropdown", specIndex = 1 },
@@ -815,6 +880,10 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                                 { type = "lsmdropdown", label = "", key = "bars.player.fontKey", mediaType = "font", allowBlank = true, visibleIf = function() return PCB.db.bars.player.enableFontOverride end },
                     { type = "checkbox", label = "Enable Outline Override", key = "bars.player.enableOutlineOverride", tooltip = "Override global outline settings for this bar only" },
                                 { type = "outlinedropdown", label = "", key = "bars.player.outline", allowBlank = true, visibleIf = function() return PCB.db.bars.player.enableOutlineOverride end },
+                    { type = "checkbox", label = "Override Bar Colour", key = "bars.player.enableColorOverride", tooltip = "Use a custom colour for this bar instead of the global cast/channel colours." },
+						{ type = "colorpickergrid", visibleIf = function() return PCB.db.bars.player.enableColorOverride end, pickers = {
+							{ label = "Bar Colour", key = "bars.player.colorOverride" },
+                    }},
                     { type = "space" },
                     { type = "twocolumngrid", items = {
                         { type = "checkbox", label = "Show Spell Name", key = "bars.player.showSpellName" },
@@ -822,8 +891,23 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                         { type = "checkbox", label = "Show Spark", key = "bars.player.showSpark" },
                         { type = "checkbox", label = "Show Time", key = "bars.player.showTime" },
                         { type = "checkbox", label = "Show Latency", key = "bars.player.showLatency" },
-                        { type = "slider", label = "Spell Icon X Offset", key = "bars.player.iconOffsetX", min = -50, max = 0, step = 1 },
                     }},
+                    { type = "slidergrid", sliders = {
+                        { label = "Spell Icon X Offset", key = "bars.player.iconOffsetX", min = -50, max = 50, step = 1 },
+                        { label = "Spell Icon Y Offset", key = "bars.player.iconOffsetY", min = -50, max = 50, step = 1, visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.player and PCB.db.bars.player.vertical end },
+                    }},
+                    { type = "checkbox", label = "Vertical Orientation", key = "bars.player.vertical", tooltip = "Rotate the bar to fill vertically instead of horizontally." },
+                    { type = "checkbox", label = "Fade Out on End", key = "fadeOnEnd", tooltip = "Fade bars out when a cast ends or is interrupted." },
+                    { type = "space" },
+                    { type = "simpledropdown", label = "Spell Name Align", key = "bars.player.spellLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Timer Align", key = "bars.player.timeLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Icon Side", key = "bars.player.iconSide",
+                      values = { left="Left", right="Right", top="Top", bottom="Bottom" } },
+                    { type = "simpledropdown", label = "Label Side", key = "bars.player.verticalLabelSide",
+                      values = { left="Left", right="Right" },
+                      visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.player and PCB.db.bars.player.vertical end },
                 }
             },
             target = {
@@ -843,14 +927,33 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                                 { type = "lsmdropdown", label = "", key = "bars.target.fontKey", mediaType = "font", allowBlank = true, visibleIf = function() return PCB.db.bars.target.enableFontOverride end },
                     { type = "checkbox", label = "Enable Outline Override", key = "bars.target.enableOutlineOverride", tooltip = "Override global outline settings for this bar only" },
                                 { type = "outlinedropdown", label = "", key = "bars.target.outline", allowBlank = true, visibleIf = function() return PCB.db.bars.target.enableOutlineOverride end },
+                    { type = "checkbox", label = "Override Bar Colour", key = "bars.target.enableColorOverride", tooltip = "Use a custom colour for this bar instead of the global cast/channel colours." },
+                                { type = "colorpickergrid", visibleIf = function() return PCB.db.bars.target.enableColorOverride end, pickers = {
+                                    { label = "Bar Colour", key = "bars.target.colorOverride" },
+                                }},
                     { type = "space" },
                     { type = "twocolumngrid", items = {
                         { type = "checkbox", label = "Show Spell Name", key = "bars.target.showSpellName" },
                         { type = "checkbox", label = "Show Spell Icon", key = "bars.target.showIcon" },
                         { type = "checkbox", label = "Show Spark", key = "bars.target.showSpark" },
                         { type = "checkbox", label = "Show Time", key = "bars.target.showTime" },
-                        { type = "slider", label = "Spell Icon X Offset", key = "bars.target.iconOffsetX", min = -50, max = 0, step = 1 },
                     }},
+                    { type = "space" },
+                    { type = "slidergrid", sliders = {
+                        { label = "Spell Icon X Offset", key = "bars.target.iconOffsetX", min = -50, max = 50, step = 1 },
+                        { label = "Spell Icon Y Offset", key = "bars.target.iconOffsetY", min = -50, max = 50, step = 1, visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.target and PCB.db.bars.target.vertical end },
+                    }},
+                    { type = "checkbox", label = "Vertical Orientation", key = "bars.target.vertical", tooltip = "Rotate the bar to fill vertically instead of horizontally." },
+                    { type = "space" },
+                    { type = "simpledropdown", label = "Spell Name Align", key = "bars.target.spellLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Timer Align", key = "bars.target.timeLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Icon Side", key = "bars.target.iconSide",
+                      values = { left="Left", right="Right", top="Top", bottom="Bottom" } },
+                    { type = "simpledropdown", label = "Label Side", key = "bars.target.verticalLabelSide",
+                      values = { left="Left", right="Right" },
+                      visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.target and PCB.db.bars.target.vertical end },
                 }
             },
             focus = {
@@ -870,15 +973,53 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                                 { type = "lsmdropdown", label = "", key = "bars.focus.fontKey", mediaType = "font", allowBlank = true, visibleIf = function() return PCB.db.bars.focus.enableFontOverride end },
                     { type = "checkbox", label = "Enable Outline Override", key = "bars.focus.enableOutlineOverride", tooltip = "Override global outline settings for this bar only" },
                                 { type = "outlinedropdown", label = "", key = "bars.focus.outline", allowBlank = true, visibleIf = function() return PCB.db.bars.focus.enableOutlineOverride end },
+                    { type = "checkbox", label = "Override Bar Colour", key = "bars.focus.enableColorOverride", tooltip = "Use a custom colour for this bar instead of the global cast/channel colours." },
+                                { type = "colorpickergrid", visibleIf = function() return PCB.db.bars.focus.enableColorOverride end, pickers = {
+                                    { label = "Bar Colour", key = "bars.focus.colorOverride" },
+                                }},
                     { type = "space" },
                     { type = "twocolumngrid", items = {
                         { type = "checkbox", label = "Show Spell Name", key = "bars.focus.showSpellName" },
                         { type = "checkbox", label = "Show Spell Icon", key = "bars.focus.showIcon" },
                         { type = "checkbox", label = "Show Spark", key = "bars.focus.showSpark" },
                         { type = "checkbox", label = "Show Time", key = "bars.focus.showTime" },
-                        { type = "slider", label = "Spell Icon X Offset", key = "bars.focus.iconOffsetX", min = -50, max = 0, step = 1 },
                     }},
+                    { type = "space" },
+                    { type = "slidergrid", sliders = {
+                        { label = "Spell Icon X Offset", key = "bars.focus.iconOffsetX", min = -50, max = 50, step = 1 },
+                        { label = "Spell Icon Y Offset", key = "bars.focus.iconOffsetY", min = -50, max = 50, step = 1, visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.focus  and PCB.db.bars.focus.vertical end },
+                    }},
+                    { type = "checkbox", label = "Vertical Orientation", key = "bars.focus.vertical", tooltip = "Rotate the bar to fill vertically instead of horizontally." },
+                    { type = "space" },
+                    { type = "simpledropdown", label = "Spell Name Align", key = "bars.focus.spellLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Timer Align", key = "bars.focus.timeLabelPosition",
+                      values = { left="Top / Left", center="Center", right="Bottom / Right" } },
+                    { type = "simpledropdown", label = "Icon Side", key = "bars.focus.iconSide",
+                      values = { left="Left", right="Right", top="Top", bottom="Bottom" } },
+                    { type = "simpledropdown", label = "Label Side", key = "bars.focus.verticalLabelSide",
+                      values = { left="Left", right="Right" },
+                      visibleIf = function() return PCB.db and PCB.db.bars and PCB.db.bars.focus and PCB.db.bars.focus.vertical end },
                 }
+            },
+            uninterruptible = {
+                name = "Uninterruptible",
+                options = {
+                    { type = "description", text = "When a cast cannot be interrupted, these overrides replace the bar's normal backdrop, border, and fill texture — making it immediately obvious at a glance." },
+                    { type = "space" },
+                    { type = "checkbox", label = "Enable Uninterruptible Styling", key = "uninterruptible.enabled" },
+                    { type = "space" },
+                    { type = "colorpickergrid", pickers = {
+                        { label = "Fill Color",     key = "colorUninterruptible" },
+                        { label = "Backdrop Color", key = "uninterruptible.backdropColor" },
+                        { label = "Border Color",   key = "uninterruptible.borderColor" },
+                    }},
+                    { type = "space" },
+                    { type = "checkbox", label = "Use Custom Fill Texture", key = "uninterruptible.useCustomTexture", tooltip = "Replace the normal fill texture with a different one when the cast is uninterruptible." },
+                    { type = "lsmdropdown", label = "", key = "uninterruptible.textureKey", mediaType = "statusbar", allowBlank = true, visibleIf = function() return PCB.db.uninterruptible and PCB.db.uninterruptible.useCustomTexture end },
+                    { type = "space" },
+                    { type = "description", text = "The Fill Color above is the bar's foreground color. Backdrop and Border Color change the frame's background and outline. The optional Custom Fill Texture swaps the bar's texture when an uninterruptible cast is active." },
+                },
             },
             gcd = {
                 name = "GCD Bar",
@@ -897,10 +1038,16 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                     { type = "lsmdropdown", label = "", key = "bars.gcd.fontKey", mediaType = "font", allowBlank = true, visibleIf = function() return PCB.db.bars.gcd.enableFontOverride end },
                     { type = "checkbox", label = "Enable Outline Override", key = "bars.gcd.enableOutlineOverride", tooltip = "Override global outline settings for the GCD bar" },
                     { type = "outlinedropdown", label = "", key = "bars.gcd.outline", allowBlank = true, visibleIf = function() return PCB.db.bars.gcd.enableOutlineOverride end },
+                    { type = "checkbox", label = "Override Bar Colour", key = "bars.gcd.enableColorOverride", tooltip = "Use a custom colour for the GCD bar." },
+                                { type = "colorpickergrid", visibleIf = function() return PCB.db.bars.gcd.enableColorOverride end, pickers = {
+                                    { label = "Bar Colour", key = "bars.gcd.colorOverride" },
+                                }},
                     { type = "space" },
                     { type = "twocolumngrid", items = {
                         { type = "checkbox", label = "Show Spark", key = "bars.gcd.showSpark" },
                         { type = "checkbox", label = "Show Time", key = "bars.gcd.showTime" },
+                        { type = "checkbox", label = "Reverse Fill (drain)", key = "bars.gcd.gcdReverseFill", tooltip = "Start full and drain right-to-left instead of filling left-to-right." },
+                        { type = "checkbox", label = "Vertical Orientation", key = "bars.gcd.vertical", tooltip = "Rotate the bar to fill vertically." },
                     }},
                     { type = "space" },
                     { type = "description", text = "The GCD bar appears whenever you use an ability that triggers the global cooldown." },
@@ -1069,6 +1216,136 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
         end
         
         -- Helper function to add a checkbox
+        -- Simple key→value dropdown (for labelPosition, iconSide, etc.)
+        -- values: { key = "Display Text", ... }
+        local function AddSimpleDropdown(parent, label, dbKey, values, y)
+            local container = CreateFrame("Frame", nil, parent)
+            container:SetPoint("TOPLEFT", 10, y)
+            container:SetSize(400, 24)
+
+            local labelBg = container:CreateTexture(nil, "BACKGROUND")
+            labelBg:SetPoint("LEFT", -4, 0)
+            labelBg:SetSize(150, 24)
+            labelBg:SetColorTexture(0.08, 0.08, 0.12, 1)
+
+            local labelText = container:CreateFontString(nil, "OVERLAY")
+            labelText:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
+            labelText:SetPoint("LEFT", 0, 0)
+            labelText:SetText(label)
+
+            local dropdown = CreateFrame("Button", nil, container)
+            dropdown:SetPoint("LEFT", container, "LEFT", 160, 0)  -- fixed x so all dropdowns align
+            dropdown:SetSize(180, 22)
+
+            local dropBg = dropdown:CreateTexture(nil, "BACKGROUND")
+            dropBg:SetAllPoints()
+            dropBg:SetColorTexture(0.12, 0.12, 0.18, 1)
+
+            local border = dropdown:CreateTexture(nil, "BORDER")
+            border:SetAllPoints()
+            border:SetColorTexture(0.25, 0.25, 0.25, 1)
+
+            local text = dropdown:CreateFontString(nil, "OVERLAY")
+            text:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
+            text:SetPoint("LEFT", 6, 0)
+            text:SetPoint("RIGHT", dropdown, "RIGHT", -22, 0)  -- leave room for arrow
+            text:SetJustifyH("LEFT")
+
+            -- Arrow button (matches LSM/Outline style)
+            local arrowBtn = CreateFrame("Button", nil, dropdown)
+            arrowBtn:SetSize(16, 16)
+            arrowBtn:SetPoint("RIGHT", dropdown, "RIGHT", -4, 0)
+
+            local arrowHighlight = arrowBtn:CreateTexture(nil, "HIGHLIGHT")
+            arrowHighlight:SetAllPoints(arrowBtn)
+            arrowHighlight:SetColorTexture(1, 1, 1, 0.2)
+
+            local normal = arrowBtn:CreateTexture(nil, "ARTWORK")
+            normal:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+            normal:SetSize(12, 12)
+            normal:SetPoint("CENTER", arrowBtn, "CENTER", 1, -3)
+            normal:SetTexCoord(0, 1, 0, 1)
+            arrowBtn:SetNormalTexture(normal)
+
+            local pushed = arrowBtn:CreateTexture(nil, "ARTWORK")
+            pushed:SetTexture("Interface\\Buttons\\Arrow-Down-Down")
+            pushed:SetSize(12, 12)
+            pushed:SetPoint("CENTER", arrowBtn, "CENTER", 1, -3)
+            pushed:SetTexCoord(0, 1, 0, 1)
+            arrowBtn:SetPushedTexture(pushed)
+
+            dropdown:SetScript("OnEnter", function() border:SetColorTexture(0.35, 0.35, 0.35, 1) end)
+            dropdown:SetScript("OnLeave", function() border:SetColorTexture(0.25, 0.25, 0.25, 1) end)
+
+            -- Build ordered key list
+            local orderedKeys = {}
+            for k in pairs(values) do orderedKeys[#orderedKeys+1] = k end
+            table.sort(orderedKeys)
+
+            local function Refresh()
+                local cur = GetValue(PCB.db, dbKey) or orderedKeys[1]
+                text:SetText(values[cur] or cur)
+            end
+            Refresh()
+
+            local menu = CreateFrame("Frame", nil, UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
+            menu:SetFrameStrata("FULLSCREEN_DIALOG")
+            menu:SetWidth(180)
+            menu:Hide()
+            if menu.SetBackdrop then
+                menu:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+                menu:SetBackdropColor(0.10, 0.10, 0.14, 0.98)
+                menu:SetBackdropBorderColor(0.25, 0.25, 0.25, 1)
+            end
+
+            for i, k in ipairs(orderedKeys) do
+                local btn = CreateFrame("Button", nil, menu)
+                btn:SetWidth(180)
+                btn:SetHeight(20)
+                btn:SetPoint("TOP", menu, "TOP", 0, -10 - (i-1)*20)
+                local btnBg = btn:CreateTexture(nil, "BACKGROUND")
+                btnBg:SetAllPoints()
+                btnBg:SetColorTexture(0.2, 0.2, 0.2, 0.8)
+                local btnText = btn:CreateFontString(nil, "OVERLAY")
+                btnText:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
+                btnText:SetPoint("LEFT", 8, 0)
+                btnText:SetText(values[k])
+                btn:SetScript("OnEnter", function() btnBg:SetColorTexture(0.4, 0.4, 0.4, 1) end)
+                btn:SetScript("OnLeave", function() btnBg:SetColorTexture(0.2, 0.2, 0.2, 0.8) end)
+                btn:SetScript("OnClick", function()
+                    SetValue(PCB.db, dbKey, k)
+                    Refresh()
+                    if PCB.ApplyAll then PCB:ApplyAll() end
+                    menu:Hide()
+                    activeMenus[menu] = nil
+                end)
+            end
+            menu:SetHeight(math.max(40, 20 + #orderedKeys * 20))
+
+            menu._arrowBtn = arrowBtn
+
+            local function ToggleMenu()
+                if menu:IsShown() then
+                    menu:Hide()
+                    activeMenus[menu] = nil
+                    UpdateArrow(arrowBtn, false)
+                else
+                    CloseAllMenus()
+                    menu:ClearAllPoints()
+                    menu:SetPoint("TOP", dropdown, "BOTTOM", 0, -4)
+                    menu:Show()
+                    activeMenus[menu] = true
+                    UpdateArrow(arrowBtn, true)
+                end
+            end
+
+            dropdown:SetScript("OnClick", ToggleMenu)
+            arrowBtn:SetScript("OnClick", ToggleMenu)
+
+            container.Refresh = Refresh
+            return container
+        end
+
         local function AddCheckbox(parent, label, dbKey, y, isProfileMode, tooltip)
             local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
             cb:SetPoint("TOPLEFT", 10, y)
@@ -1107,6 +1384,20 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                 cb:SetChecked(GetValue(PCB.db, dbKey) or false)
                 cb:SetScript("OnClick", function(self)
                     SetValue(PCB.db, dbKey, self:GetChecked())
+                    -- When toggling vertical orientation, swap stored w/h so the bar
+                    -- gets sensible dimensions instead of keeping the old orientation's sizes.
+                    if dbKey and dbKey:match("%.vertical$") then
+                        local barKey = dbKey:match("bars%.(.+)%.vertical$")
+                        if barKey and PCB.db and PCB.db.bars and PCB.db.bars[barKey] then
+                            local bdb = PCB.db.bars[barKey]
+                            if bdb.width and bdb.height then
+                                bdb.width, bdb.height = bdb.height, bdb.width
+                            else
+                                bdb.width  = nil
+                                bdb.height = nil
+                            end
+                        end
+                    end
                     if dbKey == "minimapButton.show" and PCB.UpdateMinimapButton then
                         PCB:UpdateMinimapButton()
                     end
@@ -1263,6 +1554,31 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                         PCB:Print(newState and "Test mode enabled" or "Test mode disabled")
                     end
                 end)
+            elseif onClick == "createProfile" then
+                btn:SetScript("OnClick", function()
+                    -- Find the newProfile editbox in the same scroll content
+                    local eb = scrollContent and scrollContent._newProfileEditBox
+                    local newName = eb and eb:GetText()
+                    if newName and newName ~= "" then
+                        PCB:EnsureProfile(newName)
+                        PCB:SetActiveProfileName(newName)
+                        PCB:Print("Created and switched to profile: " .. newName)
+                        if eb then eb:SetText("") end
+                        if PCB.ApplyAll then PCB:ApplyAll() end
+                        -- Rebuild panel so profile dropdown shows the new profile
+                        if optionsFrame and optionsFrame.UpdateContent then
+                            optionsFrame.UpdateContent(PCB.Options.selectedCategory or "general")
+                        end
+                    else
+                        PCB:Print("Enter a profile name first.")
+                    end
+                end)
+            elseif onClick == "resetProfile" then
+                btn:SetScript("OnClick", function()
+                    if PCB.ResetProfile then PCB:ResetProfile() end
+                    PCB:Print("Profile reset to defaults.")
+                    if PCB.ApplyAll then PCB:ApplyAll() end
+                end)
             elseif type(onClick) == "string" and onClick:match("^resetBar_") then
                 local barKey = onClick:match("^resetBar_(.+)$")
                 btn:SetScript("OnClick", function()
@@ -1405,6 +1721,7 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
         dropdownClickCatcher:Hide()
 
         dropdownClickCatcher:SetScript("OnMouseDown", function(self)
+            CloseAllMenus()
             self:Hide()
         end)
 
@@ -1536,6 +1853,8 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
 
                     if key == "existingProfile" then
                         text:SetText(currentProfile or "Default")
+                    elseif key == "defaultProfile" then
+                        text:SetText(PCB:GetDefaultProfile() or "None")
                     elseif key == "copyProfile" or key == "deleteProfile" then
                         text:SetText("Select...")
                     end
@@ -1585,12 +1904,21 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                                 end
                                 PCB:SetActiveProfileName(profileName)
                                 PCB:Print("Switched to profile: " .. profileName)
-                                text:SetText(profileName)
                                 if PCB.ApplyAll then PCB:ApplyAll() end
+                                menu:Hide()
+                                activeMenus[menu] = nil
+                                UpdateArrow(menu._arrowBtn, false)
+                                if optionsFrame and optionsFrame.UpdateContent then
+                                    optionsFrame.UpdateContent(selectedCategory)
+                                end
+                            elseif key == "defaultProfile" then
+                                PCB:SetDefaultProfile(profileName)
+                                PCB:Print("Default profile set to: " .. profileName)
+                                text:SetText(profileName)
                             elseif key == "copyProfile" then
                                 local currentName = PCB:GetActiveProfileName()
                                 if profileName ~= currentName and PCB.dbRoot.profiles[profileName] then
-                                    PCB.dbRoot.profiles[currentName] = deepcopy(PCB.dbRoot.profiles[profileName])
+                                    PCB.dbRoot.profiles[currentName] = PCB.DeepCopy(PCB.dbRoot.profiles[profileName])
                                     PCB:SelectActiveProfile()
                                     PCB:Print("Copied settings from " .. profileName)
                                     if PCB.ApplyAll then PCB:ApplyAll() end
@@ -1605,6 +1933,8 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                                 end
                             end
                             menu:Hide()
+                            activeMenus[menu] = nil
+                            dropdownClickCatcher:Hide()
                         end)
 
                         table.insert(menuButtons, btn)
@@ -1613,17 +1943,21 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                     menu:SetHeight(math.max(40, 20 + #profiles * 20))
                 end
 
+                menu._arrowBtn = arrowBtn
+
                 local function ToggleMenu()
                     UpdateDropdown()
                     if menu:IsShown() then
                         menu:Hide()
                         activeMenus[menu] = nil
                         dropdownClickCatcher:Hide()
+                        UpdateArrow(arrowBtn, false)
                     else
                         CloseAllMenus()
                         menu:SetPoint("TOP", dropdown, "BOTTOM", 0, -4)
                         menu:Show()
                         activeMenus[menu] = true
+                        UpdateArrow(arrowBtn, true)
                         -- Push click catcher to top of ESC stack (only if not already present)
                         local alreadyInList = false
                         for i = 1, #UISpecialFrames do
@@ -1855,6 +2189,8 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                             if PCB.ApplyAll then PCB:ApplyAll() end
                             
                             menu:Hide()
+                            activeMenus[menu] = nil
+                            dropdownClickCatcher:Hide()
                         end)
 
                         table.insert(menuButtons, btn)
@@ -1863,17 +2199,21 @@ discordBtn:SetScript("OnClick", ShowDiscordPopup)
                     menu:SetHeight(math.max(40, 20 + #profiles * 20))
                 end
 
+                menu._arrowBtn = arrowBtn
+
                 local function ToggleMenu()
                     UpdateDropdown()
                     if menu:IsShown() then
                         menu:Hide()
                         activeMenus[menu] = nil
                         dropdownClickCatcher:Hide()
+                        UpdateArrow(arrowBtn, false)
                     else
                         CloseAllMenus()
                         menu:SetPoint("TOP", dropdown, "BOTTOM", 0, -4)
                         menu:Show()
                         activeMenus[menu] = true
+                        UpdateArrow(arrowBtn, true)
                         -- Push click catcher to top of ESC stack (only if not already present)
                         local alreadyInList = false
                         for i = 1, #UISpecialFrames do
@@ -2029,10 +2369,22 @@ end
         local function AddSliderGrid(parent, y, sliders)
             local container = CreateFrame("Frame", nil, parent)
             container:SetPoint("TOPLEFT", 10, y)
-            container:SetSize(480, 120)  -- Sized to fit 4 sliders with spacing
-            
-            -- Create 4 sliders in a 2x2 grid
-            for i, sliderData in ipairs(sliders) do
+
+            -- Filter to visible sliders only
+            local visibleSliders = {}
+            for _, sd in ipairs(sliders) do
+                local show = true
+                if sd.visibleIf then
+                    local ok, val = pcall(sd.visibleIf)
+                    show = ok and val
+                end
+                if show then visibleSliders[#visibleSliders + 1] = sd end
+            end
+
+            local rows = math.ceil(#visibleSliders / 2)
+            container:SetSize(480, math.max(1, rows) * 60)
+
+            for i, sliderData in ipairs(visibleSliders) do
                 local slider = CreateFrame("Slider", nil, container, "OptionsSliderTemplate")
                 slider:SetWidth(220)
                 slider:SetHeight(20)
@@ -2097,6 +2449,7 @@ end
                     end
                     n = Clamp(RoundToStep(n))
                     slider:SetValue(n)
+                    valueBox:SetText(FormatValue(n))
                     valueBox:ClearFocus()
                 end
                 
@@ -2151,21 +2504,23 @@ end
         
         -- Helper function to add a label
         local function AddLabel(parent, text, y, getValue)
-            -- Create background for label
-            local labelBg = parent:CreateTexture(nil, "BACKGROUND")
+            local container = CreateFrame("Frame", nil, parent)
+            container:SetPoint("TOPLEFT", 8, y)
+            container:SetSize(300, 20)
+
+            local labelBg = container:CreateTexture(nil, "BACKGROUND")
+            labelBg:SetAllPoints()
             labelBg:SetColorTexture(0.08, 0.08, 0.12, 1)
-            labelBg:SetSize(180, 20)
-            labelBg:SetPoint("TOPLEFT", 8, y + 2)
-            
-            local label = parent:CreateFontString(nil, "OVERLAY")
+
+            local label = container:CreateFontString(nil, "OVERLAY")
             label:SetFont(LABEL_FONT, LABEL_SIZE, LABEL_FLAGS)
-            label:SetPoint("TOPLEFT", 10, y)
+            label:SetPoint("LEFT", 2, 0)
             if getValue == "currentProfile" then
                 label:SetText(string.format(text, PCB:GetActiveProfileName() or "Default"))
             else
                 label:SetText(text)
             end
-            return label
+            return container
         end
         
         -- Helper function to add a button
@@ -2468,6 +2823,8 @@ end
                 end
                 self:ClearFocus()
             end)
+            -- Tag so the Create button can look it up
+            if scrollContent then scrollContent._newProfileEditBox = editbox end
             
             return container
         end
@@ -2688,6 +3045,8 @@ end
                         SetValue(PCB.db, dbKey, mediaName)
                         text:SetText(mediaName)
                         menu:Hide()
+                        activeMenus[menu] = nil
+                        dropdownClickCatcher:Hide()
                         if PCB.ApplyAll then PCB:ApplyAll() end
                         UpdatePreview()
                     end)
@@ -2706,17 +3065,21 @@ end
                 scrollFrame:SetVerticalScroll(0)
             end
             
+            menu._arrowBtn = arrowBtn
+
             local function ToggleMenu()
                 UpdateLSMDropdown()
                 if menu:IsShown() then
                     menu:Hide()
                     activeMenus[menu] = nil
                     dropdownClickCatcher:Hide()
+                    UpdateArrow(arrowBtn, false)
                 else
                     CloseAllMenus()
                     menu:SetPoint("TOP", dropdown, "BOTTOM", 0, -4)
                     menu:Show()
                     activeMenus[menu] = true
+                    UpdateArrow(arrowBtn, true)
                     -- Push click catcher to top of ESC stack (only if not already present)
                     local alreadyInList = false
                     for i = 1, #UISpecialFrames do
@@ -2895,6 +3258,8 @@ end
                         SetValue(PCB.db, dbKey, outline.value)
                         text:SetText(outline.name)
                         menu:Hide()
+                        activeMenus[menu] = nil
+                        dropdownClickCatcher:Hide()
                         if PCB.ApplyAll then PCB:ApplyAll() end
                         UpdatePreview()
                     end)
@@ -2905,17 +3270,21 @@ end
                 menu:SetHeight(math.max(40, 20 + #outlines * 20))
             end
             
+            menu._arrowBtn = arrowBtn
+
             local function ToggleMenu()
                 UpdateOutlineDropdown()
                 if menu:IsShown() then
                     menu:Hide()
                     activeMenus[menu] = nil
                     dropdownClickCatcher:Hide()
+                    UpdateArrow(arrowBtn, false)
                 else
                     CloseAllMenus()
                     menu:SetPoint("TOP", dropdown, "BOTTOM", 0, -4)
                     menu:Show()
                     activeMenus[menu] = true
+                    UpdateArrow(arrowBtn, true)
                     -- Push click catcher to top of ESC stack (only if not already present)
                     local alreadyInList = false
                     for i = 1, #UISpecialFrames do
@@ -3169,6 +3538,8 @@ end
                                     SetValue(PCB.db, item.key, mediaName)
                                     text:SetText(mediaName)
                                     menu:Hide()
+                                    activeMenus[menu] = nil
+                                    dropdownClickCatcher:Hide()
                                     UpdateLSMDropdown()
                                     if PCB.ApplyAll then PCB:ApplyAll() end
                                 end)
@@ -3177,15 +3548,19 @@ end
                             end
                         end
                         
+                        menu._arrowBtn = arrowBtn
+
                         local function ToggleLSMMenu()
                             if menu:IsShown() then
                                 menu:Hide()
                                 activeMenus[menu] = nil
+                                UpdateArrow(arrowBtn, false)
                             else
                                 CloseAllMenus()
                                 UpdateLSMDropdown()
                                 menu:Show()
                                 activeMenus[menu] = true
+                                UpdateArrow(arrowBtn, true)
                             end
                         end
                         
@@ -3323,18 +3698,24 @@ end
                             SetValue(PCB.db, item.key, val)
                             text:SetText(outlineLabels[i])
                             menu:Hide()
+                            activeMenus[menu] = nil
+                            dropdownClickCatcher:Hide()
                             if PCB.ApplyAll then PCB:ApplyAll() end
                         end)
                     end
                     
+                    menu._arrowBtn = arrowBtn
+
                     local function ToggleOutlineMenu()
                         if menu:IsShown() then
                             menu:Hide()
                             activeMenus[menu] = nil
+                            UpdateArrow(arrowBtn, false)
                         else
                             CloseAllMenus()
                             menu:Show()
                             activeMenus[menu] = true
+                            UpdateArrow(arrowBtn, true)
                         end
                     end
                     
@@ -3621,7 +4002,7 @@ end
                             y = y - 15
                         elseif option.type == "slidergrid" then
                             widget = AddSliderGrid(scrollContent, y, option.sliders)
-                            y = y - 130
+                            y = y - (widget:GetHeight() + 10)
                         elseif option.type == "twocolumngrid" then
                             widget = AddTwoColumnGrid(scrollContent, y, option.items)
                             y = y - (widget:GetHeight() + 10)
@@ -3634,6 +4015,9 @@ end
                         elseif option.type == "colorpickergrid" then
                             widget = AddColorPickerGrid(scrollContent, y, option.pickers)
                             y = y - (widget:GetHeight() + 10)
+                        elseif option.type == "simpledropdown" then
+                            widget = AddSimpleDropdown(scrollContent, option.label, option.key, option.values, y)
+                            y = y - 35
                         elseif option.type == "checkbox" then
                             widget = AddCheckbox(scrollContent, option.label, option.key, y, option.isProfileMode, option.tooltip)
                             y = y - 35
@@ -3667,7 +4051,7 @@ end
         -- Create category buttons in sidebar (in specific order)
         -- Expose UpdateContent on the optionsFrame so other handlers can trigger a refresh
         optionsFrame.UpdateContent = UpdateContent
-        local categoryOrder = {"general", "player", "target", "focus", "gcd", "profiles"}
+        local categoryOrder = {"general", "player", "target", "focus", "gcd", "uninterruptible", "profiles"}
         local catY = -10
         for _, catKey in ipairs(categoryOrder) do
             local catData = categories[catKey]

@@ -26,35 +26,89 @@ UC._window = nil
 -- =====================================================================
 
 UC.ChangeLogs = {
+    ["0.5.3"] = [[
+Dropdown arrows — all dropdown boxes now display a matching down/up arrow; the arrow inverts when the menu is open and animates when pressed, matching the LSM dropdown style
+Current Profile label — the "Current Profile:" label in the Profiles tab now updates immediately when switching profiles via the Existing Profiles dropdown or the Create button
+Vertical orientation sizing — toggling Vertical Orientation now correctly swaps the stored bar dimensions, so the bar starts at the right size for its new orientation instead of inheriting the old horizontal values
+Fade on instant casts suppressed — the Fade Out on End option no longer triggers a brief flash on instant-cast spells (casts under 0.5 seconds are excluded from the fade)
+Drag mode arrow keys — arrow keys are now fully consumed while bars are unlocked; they no longer move the player character in any situation
+Drag mode Escape — pressing Escape while bars are unlocked deselects the currently selected bar
+Drag mode click-outside — clicking anywhere outside a bar while unlocked now deselects the selected bar
+Vertical icon sizing — the spell icon is now sized to the bar's short edge (thickness) when vertical, instead of the full bar height
+Icon side: Top and Bottom — Icon Side now offers Top and Bottom options for vertical bars; the icon centres on the bar's width automatically
+Icon off-centre fix — icons set to Top or Bottom are now correctly centred on the bar's horizontal axis
+Vertical label layout — in vertical mode, spell name and timer labels are positioned outside the bar (left or right side) rather than squeezed into the 16 px width; a new Label Side option controls which side they appear on
+Label position values renamed — Spell Name Align and Timer Align values now read "Top / Left", "Center", and "Bottom / Right" so they make sense in both orientations
+Spark vertical fix — the cast bar spark now tracks the fill edge correctly in vertical mode (anchors to the top of the fill texture instead of the right)
+Spark test mode fix — the spark position fix also applies during test mode previews
+Spell Icon Y Offset slider — a Y Offset slider is now available for the spell icon; it is shown only when Vertical Orientation is enabled, allowing fine-tuning of the gap above or below the bar
+Offset sliders always visible — X and Y offset sliders are both always shown so either can be adjusted regardless of icon side
+Offset range widened — both X and Y offset sliders now range from -50 to +50 to cover all placement scenarios
+Slider input box clamping — typing a value outside the slider's min/max range into the input box now snaps the box text to the clamped value instead of showing an out-of-range number
+    ]],
+    ["0.5.2"] = [[
+Default profile — designate any profile as the global fallback; characters with no explicit profile assignment will use it automatically
+Per-bar colour override — each bar tab has an Override Bar Colour option with its own colour picker, bypassing global cast/channel colours entirely
+Label position per bar — choose how spell name and timer are arranged per bar: Split (name left, time right), Left, Centre, or Right
+Icon side per bar — move the spell icon to the left or right side of each bar independently
+Vertical orientation — any bar can be set to fill vertically instead of horizontally
+GCD reverse fill (drain mode) — the GCD bar can now start full and drain to empty, mirroring a cooldown sweep
+Fade out on end — bars can optionally fade out smoothly when a cast ends or is interrupted, rather than snapping away instantly
+Improved unlock/drag — arrow keys nudge bars 1 px (10 px with Shift) while unlocked; live pixel coordinates are shown on the bar while dragging; positions snap to whole pixels on release
+Create Profile button — a Create button now sits directly next to the profile name field in the Profiles tab for a faster workflow
+Profile backfill — new settings are automatically applied to all existing profiles on load, preventing blank or broken values after an update
+Fixed channel bar not animating — channelled casts were showing a static bar due to the native timer check always returning true; bar fill now updates correctly every frame
+Fixed cast timer disappearing — spell name and timer texts were being re-anchored to the wrong frame level after an appearance update, making them invisible
+    ]],
+    ["0.5.1"] = [[
+Independent interrupt detection — no longer relies on Blizzard's TargetFrameSpellBar shield flag; uses UNIT_SPELLCAST_INTERRUPTIBLE / NOT_INTERRUPTIBLE events directly
+Configurable uninterruptible color — colorUninterruptible is now a user-settable color in the DB (was hardcoded red)
+Cast success/fail/interrupt flash — bars briefly flash colorSuccess or colorFailed on the corresponding events (colors were previously defined but unused)
+Latency safe-zone color — safeZoneColor from the DB is now applied dynamically each frame (was previously only set at frame creation)
+Time format option — each bar now supports "remaining" (1.4s) or "both" (1.4 / 2.5s) time display formats via timeFormat in the DB
+Pet bar — a new cast bar for the player's pet (Hunter/Warlock/etc.) is now available; disabled by default
+Empower stage colors — the four empower stage colors are now user-configurable via db.empowerStage1-4Color
+Backdrop/border colors — backdropColor and borderColor are now DB-configurable per bar
+GCD refactor — GCD.lua now shares spark, time-text, flash, and bar-fill logic with the main bar pipeline (no more duplicate code)
+Test mode kinds — /pcb test now supports cast, channel, and empower preview modes via db.testModeType
+VEHICLE_UPDATE properly handled — now refreshes both player and pet bars on vehicle transitions
+UNIT_PET event — pet bar resets and refreshes when the player's pet changes
+    ]],
+    ["0.5.0"] = [[
+Full modular refactor — codebase split into focused single-responsibility modules (Core/, Bars/)
+No functional changes; all features, settings, and SavedVariables are fully preserved
+Improved maintainability and load-order clarity via updated .toc file
+Groundwork laid for easier future feature additions and bug isolation
+    ]],
     ["0.4.9"] = [[
-• Added interrupt shield icon support on the target cast bar — displays Blizzard's interrupt shield graphic when a cast cannot be interrupted
-• Cast bar now turns red when a target's cast is uninterruptible, giving an immediate at-a-glance warning
-• Shield icon and spell icon now correctly swap in sync with the native TargetFrameSpellBar interrupt state
-• Fixed stale interrupt state not being cleared between casts
-• Refactored bar colour pipeline — channel and cast colour paths are now cleanly separated
+Added interrupt shield icon support on the target cast bar — displays Blizzard's interrupt shield graphic when a cast cannot be interrupted
+Cast bar now turns red when a target's cast is uninterruptible, giving an immediate at-a-glance warning
+Shield icon and spell icon now correctly swap in sync with the native TargetFrameSpellBar interrupt state
+Fixed stale interrupt state not being cleared between casts
+Refactored bar colour pipeline — channel and cast colour paths are now cleanly separated
     ]],
     ["0.4.8"] = [[
-• Fixed GCD bar error (UnitCastingInfo no longer called on invalid unit)
-• Fixed latency tracking error with UNIT_SPELLCAST_SENT event parameters
-• Improved castGUID validation to prevent "table index is secret" errors
+Fixed GCD bar error (UnitCastingInfo no longer called on invalid unit)
+Fixed latency tracking error with UNIT_SPELLCAST_SENT event parameters
+Improved castGUID validation to prevent "table index is secret" errors
     ]],
     ["0.4.7"] = [[
-• Fixed sytanx error in 0.4.6 changelog that caused the addon to break. Apologies for the inconvenience!
+Fixed sytanx error in 0.4.6 changelog that caused the addon to break. Apologies for the inconvenience!
     ]],
     ["0.4.6"] = [[
-• Improved internal cast timing tracking  
-• Fixed spark visibility default logic  
-• Added safe SavedVariables path helpers (GetValue / SetValue)  
-• Improved options panel stability  
-• Minor cleanup and structural refinements  
+Improved internal cast timing tracking  
+Fixed spark visibility default logic  
+Added safe SavedVariables path helpers (GetValue / SetValue)  
+Improved options panel stability  
+Minor cleanup and structural refinements  
     ]],
     ["0.4.5"] = [[
-• Full and accurate Empower spell support
-• Rewritten GCD bar (no more flicker or misfires)
-• Fixed and improved Latency / Safe Zone scaling
-• Dropdown ESC behavior fixed
-• Cleaner event handling and performance improvements
-• UI and texture layering fixes
+Full and accurate Empower spell support
+Rewritten GCD bar (no more flicker or misfires)
+Fixed and improved Latency / Safe Zone scaling
+Dropdown ESC behavior fixed
+Cleaner event handling and performance improvements
+UI and texture layering fixes
 ]],
 }
 
@@ -220,7 +274,7 @@ function UC:CreateWindow()
     if self._window then return end
 
     local f = CreateFrame("Frame", "PhoenixCastBarsUpdateWindow", UIParent, "BackdropTemplate")
-    f:SetSize(500, 400)
+    f:SetSize(500, 560)
     f:SetPoint("CENTER")
     f:SetFrameStrata("DIALOG")
     f:SetMovable(true)
@@ -231,45 +285,81 @@ function UC:CreateWindow()
     f:Hide()
 
     f:SetBackdrop({
-        bgFile = "Interface/DialogFrame/UI-DialogBox-Background",
-        edgeFile = "Interface/DialogFrame/UI-DialogBox-Border",
-        tile = true, tileSize = 32,
+        bgFile   = "Interface\\Buttons\\WHITE8x8",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 8,
         edgeSize = 32,
-        insets = { left = 8, right = 8, top = 8, bottom = 8 }
+        insets = { left = 11, right = 11, top = 11, bottom = 11 }
     })
+    f:SetBackdropColor(0.06, 0.06, 0.1, 0.97)
+    f:SetBackdropBorderColor(1, 1, 1, 1)
 
     f.title = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
     f.title:SetPoint("TOP", 0, -16)
     f.title:SetText("PhoenixCastBars Changelog")
 
+    -- X close button top-right
+    local xBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+    xBtn:SetSize(26, 26)
+    xBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+    xBtn:SetScript("OnClick", function() f:Hide() end)
+
+    -- ESC closes the window
+    f:SetScript("OnKeyDown", function(self, key)
+        if key == "ESCAPE" then f:Hide() end
+    end)
+    f:EnableKeyboard(true)
+
     local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
     scrollFrame:SetPoint("TOPLEFT", 20, -50)
     scrollFrame:SetPoint("BOTTOMRIGHT", -40, 80)
+    scrollFrame:EnableMouseWheel(true)
+    local scrollChild  -- declared early so OnMouseWheel closes over it
+    scrollFrame:SetScript("OnMouseWheel", function(self, delta)
+        local current = self:GetVerticalScroll()
+        local maxScroll = math.max(0, scrollChild:GetHeight() - self:GetHeight())
+        self:SetVerticalScroll(math.min(math.max(0, current - delta * 20), maxScroll))
+    end)
 
-    local editBox = CreateFrame("EditBox", nil, scrollFrame)
-    editBox:SetMultiLine(true)
-    editBox:SetFontObject("GameFontHighlight")
-    editBox:SetWidth(420)
-    editBox:SetAutoFocus(false)
-    editBox:EnableMouse(true)
-    editBox:SetEnabled(false) -- Make it read-only
-    editBox:SetScript("OnEscapePressed", function() editBox:ClearFocus() end)
+    scrollChild = CreateFrame("Frame", nil, scrollFrame)
+    scrollChild:SetWidth(420)
+    scrollChild:SetHeight(1)  -- will grow to fit content
+    scrollFrame:SetScrollChild(scrollChild)
 
-    scrollFrame:SetScrollChild(editBox)
+    local textFS = scrollChild:CreateFontString(nil, "OVERLAY")
+    textFS:SetFont("Fonts\\FRIZQT__.TTF", 12, "")
+    textFS:SetPoint("TOPLEFT", 0, 0)
+    textFS:SetWidth(420)
+    textFS:SetJustifyH("LEFT")
+    textFS:SetJustifyV("TOP")
+    textFS:SetWordWrap(true)
+    textFS:SetSpacing(4)
 
-    f.editBox = editBox
+    f.editBox = {
+        SetText = function(_, text)
+            textFS:SetText(text)
+            -- GetStringHeight() is valid synchronously when width is already set
+            local h = textFS:GetStringHeight()
+            scrollChild:SetHeight(math.max(h, 1))
+            -- Clamp scroll: must happen after height is set
+            local maxScroll = math.max(0, scrollChild:GetHeight() - scrollFrame:GetHeight())
+            scrollFrame:SetVerticalScroll(math.min(0, maxScroll))
+        end,
+        SetCursorPosition = function() end,
+    }
 
+    -- Bottom row: [Update Addon]  [< Previous] [Next >]  [Close] [Don't show again]
     local updateBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    updateBtn:SetSize(120, 24)
-    updateBtn:SetPoint("BOTTOMLEFT", 30, 30)
+    updateBtn:SetSize(110, 24)
+    updateBtn:SetPoint("BOTTOMLEFT", 20, 30)
     updateBtn:SetText("Update Addon")
     updateBtn:SetScript("OnClick", function()
         UC:ShowDownloadLink()
     end)
 
     local leftBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    leftBtn:SetSize(80, 24)
-    leftBtn:SetPoint("BOTTOMLEFT", 160, 30)
+    leftBtn:SetSize(90, 24)
+    leftBtn:SetPoint("BOTTOMLEFT", 140, 30)
     leftBtn:SetText("< Previous")
     leftBtn:SetScript("OnClick", function()
         local sortedVersions = GetSortedVersions()
@@ -282,8 +372,8 @@ function UC:CreateWindow()
     f.leftBtn = leftBtn
 
     local rightBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    rightBtn:SetSize(80, 24)
-    rightBtn:SetPoint("BOTTOMLEFT", 250, 30)
+    rightBtn:SetSize(90, 24)
+    rightBtn:SetPoint("BOTTOMLEFT", 238, 30)
     rightBtn:SetText("Next >")
     rightBtn:SetScript("OnClick", function()
         local sortedVersions = GetSortedVersions()
@@ -297,7 +387,7 @@ function UC:CreateWindow()
 
     local dismissBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     dismissBtn:SetSize(120, 24)
-    dismissBtn:SetPoint("BOTTOMRIGHT", -30, 30)
+    dismissBtn:SetPoint("BOTTOMRIGHT", -20, 30)
     dismissBtn:SetText("Don't show again")
     dismissBtn:SetScript("OnClick", function()
         if f.remoteVersion then
@@ -308,7 +398,6 @@ function UC:CreateWindow()
 
     self._window = f
 end
-
 -- =====================================================================
 -- Update Changelog Display
 -- =====================================================================
@@ -319,26 +408,54 @@ function UC:UpdateChangelogDisplay()
 
     local sortedVersions = GetSortedVersions()
     local currentIdx = GetVersionIndex(f.currentVersion, sortedVersions)
+    local isLatest = (currentIdx == 1)
 
     local changelog = self.ChangeLogs[f.currentVersion]
         or "No changelog available for this version."
 
-    f.editBox:SetText(
-        "Your version: " .. (f.localVersion or "0.0.0") .. "\n" ..
-        "Viewing version: " .. f.currentVersion .. "\n\n" ..
-        "Changelog:\n\n" .. changelog
-    )
+    -- Colour constants
+    local C_GOLD    = "|cffffd100"   -- version header
+    local C_ORANGE  = "|cffff9900"   -- "Latest" badge
+    local C_GRAY    = "|cffaaaaaa"   -- your version line
+    local C_WHITE   = "|cffffffff"   -- bullet text
+    local C_DIM     = "|cff888888"   -- separator
+    local C_BULLET  = "|cffff7c00"   -- bullet dot
+    local R         = "|r"
 
+    -- Header
+    local badge = isLatest and (C_ORANGE .. "  * Latest" .. R) or ""
+    local header = C_GOLD .. "Version " .. f.currentVersion .. R .. badge .. "\n"
+
+    local yourVer = C_GRAY .. "Your installed version: " .. (f.localVersion or "0.0.0") .. R .. "\n"
+
+    local sep = C_DIM .. "--------------------------------------------" .. R .. "\n"
+
+    -- Format each bullet: replace leading "" with a coloured one, colour the text white
+    local formatted = changelog:gsub("^%s+", ""):gsub("%s+$", "")
+    local lines = {}
+    for line in (formatted .. "\n"):gmatch("([^\n]*)\n") do
+        line = line:match("^%s*(.-)%s*$")  -- trim
+        if line == "" then
+            lines[#lines + 1] = ""
+        else
+            -- Strip any leading bullet character (UTF-8 = \xe2\x80\xa2, or plain -)
+            local text = line:gsub("^\xe2\x80\xa2%s*", ""):gsub("^%-%s*", "")
+            lines[#lines + 1] = C_BULLET .. ">> " .. R .. C_WHITE .. text .. R
+        end
+    end
+
+    local body = table.concat(lines, "\n")
+
+    f.editBox:SetText(header .. yourVer .. sep .. body)
     f.editBox:SetCursorPosition(0)
 
-    -- Hide left button if at the oldest version
+    -- Navigation button visibility
     if currentIdx and currentIdx >= #sortedVersions then
         f.leftBtn:Hide()
     else
         f.leftBtn:Show()
     end
 
-    -- Hide right button if at the latest version
     if currentIdx and currentIdx <= 1 then
         f.rightBtn:Hide()
     else
@@ -368,6 +485,21 @@ function UC:ShowUpdateWindow(localVersion, remoteVersion)
     f.remoteVersion = remoteVersion
     f.localVersion = localVersion
     f.currentVersion = remoteVersion
+
+    self:UpdateChangelogDisplay()
+
+    f:Show()
+end
+
+-- Opens the changelog directly, bypassing the dismissed check (e.g. from the options version button)
+function UC:ShowChangelog()
+    self:CreateWindow()
+
+    local f = self._window
+    local ver = PCB.version or "0.0.0"
+    f.remoteVersion = ver
+    f.localVersion  = ver
+    f.currentVersion = ver
 
     self:UpdateChangelogDisplay()
 

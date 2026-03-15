@@ -2,12 +2,12 @@
 ## Title: PhoenixCastBars
 ## Notes: Phoenix-styled cast bars for player/target/focus with Quartz-like features.
 ## Author: ph0enixuk
-## Version: 0.4.9
+## Version: 0.5.3
 ## IconTexture: Interface\Addons\PhoenixCastBars\Media\Phoenix_Addon_Logo
 ## SavedVariables: PhoenixCastBarsDB
 ## Category: Unit Frames
 
-## Libs
+## Libraries
 Libs/LibStub/LibStub.lua
 Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua
 Libs/LibSharedMedia-3.0/LibSharedMedia-3.0.lua
@@ -24,10 +24,32 @@ Libs/AceConfig-3.0/AceConfig-3.0.lua
 Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua
 Libs/LibDBIcon-1.0/LibDBIcon-1.0.lua
 
-## Addon Files
-CastBar.lua
+## Core — must load before everything else
+Core/Namespace.lua
+Core/Util.lua
+Core/Taint.lua
+Core/DB.lua
+Core/Profiles.lua
+Core/Media.lua
+
+## Bars — load in dependency order
+Bars/Constants.lua
+Bars/Resolve.lua
+Bars/Frame.lua
+Bars/Color.lua
+Bars/Empower.lua
+Bars/State.lua
+Bars/Actions.lua
+Bars/Update.lua
+Bars/Drag.lua
+Bars/Test.lua
+Bars/Blizzard.lua
+Bars/Events.lua
+
+## Feature modules
 GCD.lua
 Options.lua
-PhoenixCastBars.lua
 UpdateCheck.lua
 
+## Boot — wires everything together, must load last
+Core/Bootstrap.lua
