@@ -5,8 +5,7 @@
 --  Shift+WheelUp  = switch to Bar6 slot range (145-156)
 --  Shift+WheelDown = switch back to default Bar1 slots (1-12)
 --
---  Uses SetOverrideBindingClick + SecureHandlerClickTemplate for reliable
---  combat-safe operation.
+--  Hooks into EAB's UpdateOffset RunAttribute for combat-safe operation.
 --  Survives EllesmereUIActionBars updates — no files modified in that addon.
 -------------------------------------------------------------------------------
 local ADDON_NAME = ...
@@ -23,13 +22,11 @@ local function Init()
     local mainBar = _G[MAINBAR_FRAME]
     if not mainBar then return end
 
-    -- Verify at least one MainBar button exists
     if not _G["ActionButton1"] then return end
 
     ---------------------------------------------------------------------------
     --  1. Create a SecureHandlerClickTemplate button
     --     SetOverrideBindingClick maps Shift+Wheel to virtual clicks on this.
-    --     _onclick secure snippet handles the actual page switch.
     ---------------------------------------------------------------------------
     local handler = CreateFrame("Button", HANDLER_NAME, UIParent,
                                 "SecureHandlerClickTemplate")
@@ -38,46 +35,31 @@ local function Init()
     handler:RegisterForClicks("AnyDown")
     handler:SetAttribute("shiftPage", 0)
 
-    -- Store frame refs so secure snippet can reach mainbar + buttons
     handler:SetFrameRef("mainbar", mainBar)
-    for i = 1, NUM_BUTTONS do
-        local btn = _G["ActionButton" .. i]
-        if btn then
-            handler:SetFrameRef("btn" .. i, btn)
-        end
-    end
 
     ---------------------------------------------------------------------------
     --  2. Secure click handler
-    --     LeftButton  (Shift+WheelUp)   = switch to Bar6 slots (145-156)
-    --     RightButton (Shift+WheelDown) = switch back to Bar1 slots (1-12)
+    --     Toggles shiftPage, then re-runs MainBar's UpdateOffset so the
+    --     unified offset pipeline (including ChildUpdate) handles everything.
     ---------------------------------------------------------------------------
     handler:SetAttribute("_onclick", [[
-        local mainbar    = self:GetFrameRef("mainbar")
-        local pageOffset = mainbar:GetAttribute("pageOffset") or 0
+        local mainbar = self:GetFrameRef("mainbar")
 
-        -- Block switching while a form/vehicle page is active
-        if pageOffset ~= 0 then return end
+        -- Block switching during override/vehicle bar
+        local overridePage = mainbar:GetAttribute("state-overridepage") or 0
+        if overridePage > 0 and mainbar:GetAttribute("state-overridebar") then
+            return
+        end
 
-        -- Toggle: if already on Bar6 → back to Bar1, otherwise → Bar6
+        -- Block switching when not on default page (stance/form paging)
+        local page = mainbar:GetAttribute("state-page") or 1
+        if page ~= 1 then return end
+
         local shiftPage = self:GetAttribute("shiftPage") or 0
         local newShiftPage = shiftPage == 1 and 0 or 1
-
-
         self:SetAttribute("shiftPage", newShiftPage)
-        local offset = newShiftPage == 1 and 144 or 0
-        mainbar:SetAttribute("actionOffset", offset)
 
-        -- Directly update each button's action attribute
-        for i = 1, 12 do
-            local btn = self:GetFrameRef("btn" .. i)
-            if btn then
-                local idx = btn:GetAttribute("index")
-                if idx then
-                    btn:SetAttribute("action", idx + offset)
-                end
-            end
-        end
+        mainbar:RunAttribute("UpdateOffset")
     ]])
 
     ---------------------------------------------------------------------------
@@ -90,50 +72,56 @@ local function Init()
         "SHIFT-MOUSEWHEELDOWN", HANDLER_NAME, "RightButton")
 
     ---------------------------------------------------------------------------
-    --  4. Replace MainBar _onstate-page
-    --     Original only tracks actionOffset.  We add:
-    --       • pageOffset  (raw page-based offset, before shift override)
-    --       • shiftPage reset when entering a form/vehicle
+    --  4. Replace MainBar's UpdateOffset RunAttribute
+    --     Preserves upstream's full offset pipeline (override bar detection,
+    --     vehicle/possess fallback, slot-132 skip), then layers shiftPage
+    --     override on top.  _onstate-page / _onstate-overridebar /
+    --     _onstate-overridepage all still funnel into this single attribute.
     ---------------------------------------------------------------------------
     mainBar:SetFrameRef("pageSwitch", handler)
-    mainBar:SetAttribute("pageOffset", 0)
 
-    mainBar:SetAttribute("_onstate-page", [[
-        local page = tonumber(newstate) or 1
+    mainBar:SetAttribute("UpdateOffset", [[
+        local offset = 0
 
-        -- Vehicle / possess / bonus bar fallback (copied from original)
-        if page == 11 then
-            if HasVehicleActionBar() then
-                page = GetVehicleBarIndex()
-            elseif HasOverrideActionBar() then
-                page = GetOverrideBarIndex()
-            elseif HasTempShapeshiftActionBar() then
-                page = GetTempShapeshiftBarIndex()
-            elseif HasBonusActionBar() then
-                page = GetBonusBarIndex()
+        local overridePage = self:GetAttribute("state-overridepage") or 0
+        if overridePage > 0 and self:GetAttribute("state-overridebar") then
+            offset = (overridePage - 1) * self:GetAttribute("overrideBarLength")
+        else
+            local page = self:GetAttribute("state-page") or 1
+
+            if page == 11 then
+                if HasVehicleActionBar() then
+                    page = GetVehicleBarIndex()
+                elseif HasOverrideActionBar() then
+                    page = GetOverrideBarIndex()
+                elseif HasTempShapeshiftActionBar() then
+                    page = GetTempShapeshiftBarIndex()
+                elseif HasBonusActionBar() then
+                    page = GetBonusBarIndex()
+                end
+            end
+
+            local barLen = self:GetAttribute("barLength")
+            offset = (page - 1) * barLen
+
+            if offset >= 132 then
+                offset = offset + 12
             end
         end
 
-        local barLen     = self:GetAttribute("barLength")
-        local pageOffset = (page - 1) * barLen
-        self:SetAttribute("pageOffset", pageOffset)
-
-        -- Read shift-page state from our click handler
-        local ps        = self:GetFrameRef("pageSwitch")
+        -- PageSwitch: read shift-page state from click handler
+        local ps = self:GetFrameRef("pageSwitch")
         local shiftPage = ps and ps:GetAttribute("shiftPage") or 0
 
         -- Auto-reset shift page when a form/vehicle overrides paging
-        if pageOffset > 0 and shiftPage == 1 then
+        if offset > 0 and shiftPage == 1 then
             if ps then ps:SetAttribute("shiftPage", 0) end
             shiftPage = 0
         end
 
-        -- Compute final offset
-        local offset
-        if shiftPage == 1 and pageOffset == 0 then
-            offset = 144   -- Bar6 slots
-        else
-            offset = pageOffset
+        -- Apply Bar6 override when on default page
+        if shiftPage == 1 and offset == 0 then
+            offset = 144
         end
 
         self:SetAttribute("actionOffset", offset)
@@ -148,9 +136,6 @@ local function Init()
     indicator:SetTextColor(0.8, 0.8, 0.2, 0.9)
     indicator:Hide()
 
-    -- Event-driven indicator: fires only when _onclick or _onstate-page
-    -- changes the shiftPage attribute. Replaces C_Timer.NewTicker(0.1) polling
-    -- which caused continuous ACTIONBAR_SLOT_CHANGED 29 spam (~30 events/sec).
     handler:SetScript("OnAttributeChanged", function(self, name, value)
         if name == "shiftPage" then
             if value == 1 then
@@ -194,7 +179,6 @@ bootstrap:SetScript("OnEvent", function(self, event)
             _initDone = true
             Init()
         else
-            -- Fallback: retry after another second (first-install path)
             C_Timer.After(2, function()
                 if _initDone then return end
                 if InCombatLockdown() then
